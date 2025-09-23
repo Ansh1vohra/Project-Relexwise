@@ -1,11 +1,11 @@
 import os
 import uuid
 from typing import List
-from llama_parse import LlamaParse, ResultType
-from llama_index.core import VectorStoreIndex, Settings, StorageContext
-from llama_index.vector_stores.chroma import ChromaVectorStore
-import chromadb
-from llama_index.embeddings.google_genai import GoogleGenAIEmbedding
+from llama_parse import LlamaParse, ResultType # type: ignore
+from llama_index.core import VectorStoreIndex, Settings, StorageContext # type: ignore
+from llama_index.vector_stores.chroma import ChromaVectorStore # type: ignore
+import chromadb # type: ignore
+from llama_index.embeddings.google_genai import GoogleGenAIEmbedding # type: ignore
 
 # --- SETTINGS ---
 Settings.embed_model = GoogleGenAIEmbedding(model_name="text-embedding-004", embed_batch_size=32)

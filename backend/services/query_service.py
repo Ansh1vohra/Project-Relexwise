@@ -1,9 +1,9 @@
 import json
 import re
-from llama_index.core import VectorStoreIndex, StorageContext
-from llama_index.vector_stores.chroma import ChromaVectorStore
-from llama_index.llms.google_genai import GoogleGenAI
-import chromadb
+from llama_index.core import VectorStoreIndex, StorageContext # type: ignore
+from llama_index.vector_stores.chroma import ChromaVectorStore # type: ignore
+from llama_index.llms.google_genai import GoogleGenAI # type: ignore
+import chromadb # type: ignore
 
 # Persistent storage
 db = chromadb.PersistentClient(path="./chroma_db")
