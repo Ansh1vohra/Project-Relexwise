@@ -1,9 +1,9 @@
 import os
 import shutil
 from typing import List
-from fastapi import FastAPI, UploadFile, File
-from fastapi.responses import JSONResponse
-from dotenv import load_dotenv
+from fastapi import FastAPI, UploadFile, File # type: ignore
+from fastapi.responses import JSONResponse # type: ignore
+from dotenv import load_dotenv # type: ignore
 from constants import PROMPT,UPLOAD_DIR
 
 load_dotenv(dotenv_path=".env")

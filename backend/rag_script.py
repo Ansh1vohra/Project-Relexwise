@@ -1,12 +1,12 @@
 import os
 import uuid
-import chromadb
-from llama_parse import LlamaParse, ResultType
-from llama_index.llms.google_genai import GoogleGenAI
-from llama_index.embeddings.google_genai import GoogleGenAIEmbedding
-from llama_index.core import VectorStoreIndex, Settings, StorageContext
-from llama_index.vector_stores.chroma import ChromaVectorStore
-from dotenv import load_dotenv
+import chromadb # type: ignore
+from llama_parse import LlamaParse, ResultType # type: ignore
+from llama_index.llms.google_genai import GoogleGenAI # type: ignore
+from llama_index.embeddings.google_genai import GoogleGenAIEmbedding # type: ignore
+from llama_index.core import VectorStoreIndex, Settings, StorageContext # type: ignore
+from llama_index.vector_stores.chroma import ChromaVectorStore # type: ignore
+from dotenv import load_dotenv # type: ignore
 
 load_dotenv()
 
