@@ -1,1 +1,78 @@
+# -------------------------------
+# Python
+# -------------------------------
+__pycache__/
+*.py[oc]
+*.pyo
+*.pyd
+*.so
+
+# Build / packaging
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv/
+env/
 venv/
+
+# -------------------------------
+# Project-specific
+# -------------------------------
+# Data & uploads
+data/
+uploads/
+uploaded_pdfs/
+
+# Vector DB storage
+chroma*_db/
+chromadb/
+
+# Logs & temp files
+logs/
+*.log
+*.log.*
+*.tmp
+*.bak
+*.backup
+*.swp
+*.swo
+
+# SQLite / DB files
+*.sqlite3
+*.db
+*.db-journal
+
+# -------------------------------
+# Environment & configs
+# -------------------------------
+.env
+.env.*
+!.env.example  # Keep example env files
+
+# IDE / Editor
+.vscode/
+.idea/
+*.iml
+
+# -------------------------------
+# Dependency locks
+# -------------------------------
+uv.lock
+poetry.lock
+Pipfile.lock
+
+# -------------------------------
+# Jupyter
+# -------------------------------
+*.ipynb_checkpoints/
+.ipynb_checkpoints/
+
+# -------------------------------
+# OS-specific
+# -------------------------------
+.DS_Store
+Thumbs.db
+ehthumbs.db
