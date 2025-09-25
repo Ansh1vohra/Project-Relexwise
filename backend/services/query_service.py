@@ -6,7 +6,7 @@ from llama_index.llms.google_genai import GoogleGenAI # type: ignore
 import chromadb # type: ignore
 
 # Persistent storage
-db = chromadb.PersistentClient(path="./chroma_db")
+db = chromadb.PersistentClient(path="./chroma2_db")
 collection_name = "contract_docs"
 chroma_collection = db.get_or_create_collection(collection_name)
 vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
