@@ -10,12 +10,22 @@ logger = logging.getLogger(__name__)
 
 class PDFProcessingService:
     def __init__(self):
-        self.parser = LlamaParse(
-            api_key=settings.llama_cloud_api_key,
-            result_type=ResultType.TXT,  # Use proper enum value
-            verbose=True,
-            language="en"
-        )
+        # self.parser = LlamaParse(
+        #     api_key=settings.llama_cloud_api_key,
+        #     result_type=ResultType.TXT,  # Use proper enum value
+        #     verbose=True,
+        #     language="en"
+        # )
+        # self.parser = LlamaParse(
+        #     api_key=settings.llama_cloud_api_key,
+        #     result_type=ResultType.MD,
+        #     disable_ocr=False,
+        #     auto_mode=True,
+        #     auto_mode_trigger_on_image_in_page=True,
+        #     verbose=True,
+        #     language="en"
+        # )
+        pass
     
     async def extract_text_from_pdf(self, file_content: bytes, filename: str) -> str:
         """
@@ -169,11 +179,14 @@ class PDFProcessingService:
             from app.config import settings
             sync_parser = LlamaParse(
                 api_key=settings.llama_cloud_api_key,
-                result_type=ResultType.TXT,
+                result_type=ResultType.MD,
+                disable_ocr=False,
+                auto_mode=True,
+                auto_mode_trigger_on_image_in_page=True,
                 verbose=True,
                 language="en"
-            )
-            
+        )
+
             # Use load_data method with error handling
             documents = sync_parser.load_data(file_path)
             
