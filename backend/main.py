@@ -1,59 +1,81 @@
-import os
-import shutil
-from typing import List
-from fastapi import FastAPI, UploadFile, File
-from fastapi.responses import JSONResponse
-from dotenv import load_dotenv
-from constants import PROMPT,UPLOAD_DIR
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
+import logging
+from app.database import create_tables
+from app.routers import files
+from app.routers import search_simple as search
+from app.services.processing_queue import ProcessingQueue
+from app.utils.logging import setup_logging
+from app.utils.exceptions import (
+    global_exception_handler,
+    http_exception_handler,
+    processing_exception_handler,
+    validation_exception_handler,
+    ProcessingException,
+    ValidationException
+)
 
-load_dotenv(dotenv_path=".env")
+# Setup logging first
+setup_logging()
+logger = logging.getLogger(__name__)
 
-os.environ["LLAMA_CLOUD_API_KEY"] = os.getenv("LLAMA_CLOUD_API_KEY")
-os.environ["GOOGLE_API_KEY"] = os.getenv("GOOGLE_API_KEY")
+# Initialize the processing queue globally
+processing_queue = ProcessingQueue()
 
-from services.upload_service import upload_pdfs
-from services.query_service import query_contracts  
-
-# --- FASTAPI APP ---
-app = FastAPI(title="Contract PDF Service")
-
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-@app.post("/upload-contracts")
-async def upload_endpoint(files: List[UploadFile] = File(...)):
-    """
-    Endpoint to upload and index PDF files.
-    """
-    print("Received upload request...")
-    try:
-        file_paths = []
-        for file in files:
-            file_path = os.path.join(UPLOAD_DIR, file.filename)
-            with open(file_path, "wb") as f:
-                shutil.copyfileobj(file.file, f)
-            file_paths.append(file_path)
-
-        result = upload_pdfs(file_paths)
-        return JSONResponse(content=result)
-
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
-
-@app.get("/query-contracts")
-async def query_endpoint():
-    """
-    Endpoint to query indexed PDFs for contract information.
-    """
-    try:
-        result = query_contracts(prompt=PROMPT)
-        return JSONResponse(content=result)
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    logger.info("Starting up...")
+    await create_tables()
+    await processing_queue.start()
     
-@app.get("/health")
-async def health():
-    return {"status": "healthy", "service": "contract-rag"}
+    # Set the processing queue in the router
+    from app.routers.files import set_processing_queue
+    set_processing_queue(processing_queue)
+    
+    yield
+    # Shutdown
+    logger.info("Shutting down...")
+    await processing_queue.stop()
+
+app = FastAPI(
+    title="Contract Processing API",
+    description="API for uploading and processing contracts with vector and metadata extraction",
+    version="1.0.0",
+    lifespan=lifespan
+)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Configure this properly for production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Add exception handlers
+app.add_exception_handler(Exception, global_exception_handler)
+app.add_exception_handler(HTTPException, http_exception_handler)
+app.add_exception_handler(ProcessingException, processing_exception_handler)
+app.add_exception_handler(ValidationException, validation_exception_handler)
+
+# Include routers
+app.include_router(files.router, prefix="/api/v1", tags=["files"])
+app.include_router(search.router, prefix="/api/v1/search", tags=["search"])
+
+# Set the processing queue in the files router
+files.set_processing_queue(processing_queue)
 
 @app.get("/")
 async def root():
-    return {"message": "Welcome to the Contract PDF Service. Use /upload-pdfs to upload files and /query-contracts to query contract information."}
+    return {"message": "Contract Processing API is running"}
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)

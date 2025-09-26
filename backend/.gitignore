@@ -49,8 +49,6 @@ logs/
 # Environment & configs
 # -------------------------------
 .env
-.env.*
-!.env.example  # Keep example env files
 
 # IDE / Editor
 .vscode/

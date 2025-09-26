@@ -1,10 +1,28 @@
-chromadb==1.0.20
-llama-parse==0.6.54
-llama-index==0.13.4
-llama-index-llms-google-genai==0.3.0
-llama-index-embeddings-google-genai==0.3.0
-llama-index-vector-stores-chroma==0.5.2
-python-dotenv==1.1.1
-fastapi
-uvicorn
+fastapi>=0.100.0
+uvicorn[standard]>=0.30.0
 python-multipart
+python-dotenv
+sqlalchemy>=2.0.0
+psycopg2-binary
+alembic
+pydantic>=2.0.0
+pydantic-settings
+cloudinary
+llama-parse
+google-generativeai
+chromadb
+aiofiles
+asyncpg
+
+# LlamaIndex dependencies - let pip resolve compatible versions
+llama-index-core
+llama-index-vector-stores-chroma
+llama-index-llms-google-genai
+llama-index-embeddings-google-genai
+
+# Additional dependencies
+pandas
+numpy
+tiktoken
+httpx
+anyio
