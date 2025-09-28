@@ -21,48 +21,147 @@ class MetadataExtractionService:
         Build the prompt for metadata extraction
         """
         return """
-You are an expert contract analyst. From the given contract text, extract the following specific commercial and clause-related details with high precision:
+You are an expert Contract Manager and Legal Analyst. You carefully read IT service contracts and extract only the precise, objective details requested. Do not add assumptions. If information is missing or ambiguous, return "NA".
 
-REQUIRED FIELDS:
-1. Start Date: The contract start/effective date (format: YYYY-MM-DD if possible, otherwise as written)
-2. End Date: The contract end/expiry/termination date (format: YYYY-MM-DD if possible, otherwise as written)  
-3. Vendor Name: The company/vendor providing services or goods
-4. Contract Value: The total monetary value, amount, or price mentioned in the contract
+From the following contract text, extract the following details in structured format.
+Each field must return a precise value or "NA" if not available.
+Do not include explanations, only structured output.
 
-CONTRACT TYPE (select EXACTLY one):
-- MSA (Master Service Agreement)
-- SOW (Statement of Work)
-- Amendment
-- Agreement
-- Order Form
-- Change Request
-- Other (if none of the above match)
+Fields to Extract:
 
-SCOPE OF SERVICES (select EXACTLY one):
-- Managed Services
-- Time & Material
-- Hardware
-- Software
-- Maintenance
+VendorName - Legal name of the counterparty/vendor.
 
-INSTRUCTIONS:
-- If any field cannot be found or determined, mark it as "NA"
-- Be precise and extract exact values as they appear in the contract
-- For dates, try to standardize to YYYY-MM-DD format when possible
-- For contract value, include currency if mentioned
-- Choose the most appropriate category from the provided options
+StartDate - Effective date or commencement date.
 
-Respond ONLY in JSON format with these exact keys:
+EndDate - Expiry date or contract end date. If end date is not provided and we have contract duration provided (next column), then autocalculate End Date using Contract Duration - End Date equals Start Date plus contract duration
+
+Contract Duration - Contract Term, Active Term of the contract. If it's not provided, autocalculate using Start Date and End Date. End Date minus Start Date in Years up to one decimal point.
+
+ContractValue (Local)→ Total contract value (with number only) in the given currency.
+
+Currency → Currency of the contract value (USD, INR, EUR, etc.).
+
+Contract Value (USD) - Convert the Contract Value to US Dollars using the Forex dates from Oanda.
+
+ContractStatus → Classify as one of: "Active", "Draft", "Expired". Draft means that the contract doesn't have any signature or stakeholder names (actual people from both Vendor Side and Customer Side)
+
+Rule: If StartDate ≤ today ≤ EndDate → Active. If EndDate < today → Expired. If unsigned / marked draft → Draft.
+
+ContractType → Classify as one of: "MSA", "SOW", "Amendment", "Agreement", "Order Form", "Change Request", "Other".
+
+ScopeOfServices → Classify as one of: "Managed Services", "Time & Material", "Hardware", "Software", "Maintenance", "Other".
+
+Commercial Terms (Detailed Extraction Guide) - We need to extract the Commercial Terms across respective ScopeOfServices ("Managed Services", "Time & Material", "Hardware", "Software", "Maintenance").
+
+Managed Services - 
+1. TerminationForConvenience
+What to Extract: Does the contract allow either party to terminate without cause? If yes → period of notice (e.g., "90 days' notice").
+Example Clause: "Either party may terminate this Agreement for convenience upon 90 days' prior written notice."
+Expected Output: "90 days"
+If Absent: "NA"
+
+2. LiabilityCap
+What to Extract: The monetary or time-based cap on vendor's liability (e.g., "12 months of fees," "$2 million cap").
+Example Clause: "Vendor's aggregate liability shall not exceed the fees paid in the preceding 12 months."
+Expected Output: "12 months of fees"
+If Absent: "NA"
+
+PaymentTerms
+What to Extract: Days allowed for invoice settlement (Net 30/45/60).
+Example Clause: "Invoices are payable within 45 days of receipt."
+Expected Output: "Net 45"
+If Absent: "NA"
+
+b. Time & Material
+1. COLA (Cost of Living Adjustment)
+What to Extract: Any reference to annual price adjustment tied to CPI/Inflation indices. Capture % or formula.
+Example Clause: "Charges shall increase annually by the lesser of 5% or the CPI index."
+Expected Output: "5% or CPI annually"
+If Absent: "NA"
+2. FXExposure (Currency/Exchange Clauses)
+What to Extract: Whether contract prices are fixed in one currency or subject to FX fluctuation.
+Example Clause: "All payments shall be made in USD; any FX variations to be borne by Customer."
+Expected Output: "Prices fixed in USD; FX borne by Customer"
+If Absent: "NA"
+
+3. Volume Discount
+What to Extract: Volume discount based on Project Size or total spend.
+Example Clause: "5% volume discount on spend beyond $10M"
+Expected Output: 5% at 10M+
+If Absent: "NA"
+
+c. Hardware
+1. WarrantyPeriod
+What to Extract: Warranty length for hardware (3, 12, 36 months).
+Example Clause: "Vendor warrants hardware for 12 months from delivery."
+Expected Output: "12 months"
+If Absent: "NA"
+
+2. DeliveryRiskAllocation
+What to Extract: Who bears risk of loss/damage during shipping (Vendor vs Buyer).
+Example Clause: "Risk of loss passes to Customer upon delivery at site."
+Expected Output: "Risk passes on delivery at site"
+If Absent: "NA"
+
+3. AcceptanceCriteria
+What to Extract: When hardware is deemed "accepted" (on delivery, after inspection, after testing).
+Example Clause: "Acceptance shall occur after 30 days of successful performance testing."
+Expected Output: "30 days testing before acceptance"
+If Absent: "NA"
+
+d. Software
+1. AutoRenewal
+What to Extract: Does the contract auto-renew? Capture period + notice required.
+Example Clause: "This subscription shall auto-renew annually unless terminated 60 days before expiry."
+Expected Output: "Auto-renews annually; 60 days' notice required"
+If Absent: "NA"
+
+2. COLA (Uplift Clauses)
+What to Extract: Any annual price uplift %.
+Example Clause: "License fees shall increase by 7% annually."
+Expected Output: "7% annual uplift"
+If Absent: "NA"
+
+3. SupportWarranty
+What to Extract: Duration of included support/warranty (e.g., bug fixes, updates).
+Example Clause: "Vendor shall provide 6 months support at no additional charge."
+Expected Output: "6 months included support"
+If Absent: "NA"
+
+e. Maintenance & Support
+1. EscalationPercentage (Annual Increases)
+What to Extract: % annual escalation on fees.
+Example Clause: "Maintenance fees shall increase by 5% annually."
+Expected Output: "5% per year"
+If Absent: "NA"
+
+2. AutoRenewal
+What to Extract: Renewal mechanics for maintenance contract.
+Example Clause: "Agreement auto-renews for 1-year terms unless terminated 30 days before expiry."
+Expected Output: "Auto-renews yearly; 30 days' notice"
+If Absent: "NA"
+
+3. SLAPenalties (Service Credits)
+What to Extract: Penalties for SLA breaches (e.g., % of monthly fee).
+Example Clause: "If uptime falls below 99.9%, Customer entitled to 5% service credit."
+Expected Output: "5% credit if uptime <99.9%"
+If Absent: "NA"
+
+Please return the response in the following JSON format with only the main fields we need to store in the database:
 {
-  "start_date": "extracted start date or NA",
-  "end_date": "extracted end date or NA", 
-  "vendor_name": "extracted vendor name or NA",
-  "contract_value": "extracted contract value or NA",
-  "contract_type": "one of the specified contract types",
-  "scope_of_services": "one of the specified scope types"
+    "vendor_name": "extracted value or NA",
+    "start_date": "extracted value or NA",
+    "end_date": "extracted value or NA",
+    "contract_duration": "extracted value or NA",
+    "contract_value_local": "extracted value or NA",
+    "currency": "extracted value or NA",
+    "contract_value_usd": "extracted value or NA",
+    "contract_status": "extracted value or NA",
+    "contract_type": "extracted value or NA",
+    "scope_of_services": "extracted value or NA"
 }
 
-CONTRACT TEXT:
+Contract text to analyze:
 """
     
     async def extract_metadata(self, contract_text: str, file_id: str) -> Dict:
@@ -144,10 +243,15 @@ CONTRACT TEXT:
         """
         # Define valid options
         valid_contract_types = ["MSA", "SOW", "Amendment", "Agreement", "Order Form", "Change Request", "Other"]
-        valid_scope_types = ["Managed Services", "Time & Material", "Hardware", "Software", "Maintenance"]
+        valid_scope_types = ["Managed Services", "Time & Material", "Hardware", "Software", "Maintenance", "Other"]
+        valid_contract_status = ["Active", "Draft", "Expired"]
         
         # Ensure all required fields exist
-        required_fields = ["start_date", "end_date", "vendor_name", "contract_value", "contract_type", "scope_of_services"]
+        required_fields = [
+            "start_date", "end_date", "vendor_name", "contract_duration",
+            "contract_value_local", "currency", "contract_value_usd",
+            "contract_status", "contract_type", "scope_of_services"
+        ]
         for field in required_fields:
             if field not in metadata or metadata[field] is None:
                 metadata[field] = "NA"
@@ -158,12 +262,22 @@ CONTRACT TEXT:
         
         # Validate scope of services  
         if metadata.get("scope_of_services") not in valid_scope_types:
-            metadata["scope_of_services"] = "NA"
+            metadata["scope_of_services"] = "Other"
+            
+        # Validate contract status
+        if metadata.get("contract_status") not in valid_contract_status:
+            metadata["contract_status"] = "NA"
         
         # Clean up empty strings
         for key, value in metadata.items():
             if isinstance(value, str) and value.strip() == "":
                 metadata[key] = "NA"
+                
+        # Keep legacy contract_value field for backward compatibility
+        if "contract_value_local" in metadata and metadata["contract_value_local"] != "NA":
+            metadata["contract_value"] = metadata["contract_value_local"]
+        else:
+            metadata["contract_value"] = "NA"
         
         return metadata
     
@@ -174,10 +288,15 @@ CONTRACT TEXT:
         return {
             "start_date": "NA",
             "end_date": "NA",
-            "vendor_name": "NA", 
-            "contract_value": "NA",
+            "vendor_name": "NA",
+            "contract_duration": "NA",
+            "contract_value_local": "NA",
+            "currency": "NA",
+            "contract_value_usd": "NA",
+            "contract_status": "NA",
             "contract_type": "Other",
-            "scope_of_services": "NA"
+            "scope_of_services": "Other",
+            "contract_value": "NA"  # Legacy field for backward compatibility
         }
 
 metadata_extraction_service = MetadataExtractionService()
