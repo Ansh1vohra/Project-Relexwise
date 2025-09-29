@@ -9,6 +9,12 @@ class ProcessingStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
 
+class ContractStatus(str, Enum):
+    ACTIVE = "Active"
+    DRAFT = "Draft"
+    EXPIRED = "Expired"
+    NA = "NA"
+
 class ContractType(str, Enum):
     MSA = "MSA"
     SOW = "SOW"
@@ -25,6 +31,7 @@ class ScopeOfServices(str, Enum):
     HARDWARE = "Hardware"
     SOFTWARE = "Software"
     MAINTENANCE = "Maintenance"
+    OTHER = "Other"
     NA = "NA"
 
 class FileUploadResponse(BaseModel):
@@ -39,9 +46,14 @@ class FileMetadataSchema(BaseModel):
     start_date: Optional[str] = None
     end_date: Optional[str] = None
     vendor_name: Optional[str] = None
-    contract_value: Optional[str] = None
+    contract_duration: Optional[str] = None
+    contract_value_local: Optional[str] = None
+    currency: Optional[str] = None
+    contract_value_usd: Optional[str] = None
+    contract_status: Optional[str] = None
     contract_type: Optional[str] = None
     scope_of_services: Optional[str] = None
+    contract_value: Optional[str] = None  # Legacy field for backward compatibility
     extraction_timestamp: datetime
     raw_text_length: Optional[int] = None
     confidence_score: Optional[float] = None

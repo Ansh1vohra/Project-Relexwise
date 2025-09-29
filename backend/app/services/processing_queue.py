@@ -176,9 +176,14 @@ class ProcessingQueue:
             start_date=metadata.get("start_date"),
             end_date=metadata.get("end_date"),
             vendor_name=metadata.get("vendor_name"),
-            contract_value=metadata.get("contract_value"),
+            contract_duration=metadata.get("contract_duration"),
+            contract_value_local=metadata.get("contract_value_local"),
+            currency=metadata.get("currency"),
+            contract_value_usd=metadata.get("contract_value_usd"),
+            contract_status=metadata.get("contract_status"),
             contract_type=metadata.get("contract_type"),
             scope_of_services=metadata.get("scope_of_services"),
+            contract_value=metadata.get("contract_value"),  # Legacy field for backward compatibility
             raw_text_length=text_length,
             extraction_timestamp=datetime.utcnow()
         )
