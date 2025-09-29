@@ -77,9 +77,20 @@ class ProcessingQueue:
                 
                 logger.info(f"{worker_name} processing file: {filename} ({file_id})")
                 
-                # Process the file
-                await self._process_file(file_id, file_content, filename, worker_name)
-                
+                # Process the file with retry logic
+                max_retries = 3
+                for attempt in range(1, max_retries + 1):
+                    try:
+                        await self._process_file(file_id, file_content, filename, worker_name)
+                        break  # Success, exit retry loop
+                    except Exception as e:
+                        logger.error(f"{worker_name} error processing {filename} (attempt {attempt}): {str(e)}")
+                        if attempt < max_retries:
+                            await asyncio.sleep(5)  # Wait before retry
+                        else:
+                            logger.error(f"{worker_name} failed to process {filename} after {max_retries} attempts.")
+                            # Mark as failed in DB (already handled in _process_file)
+                            break
                 # Mark task as done
                 self.queue.task_done()
                 
