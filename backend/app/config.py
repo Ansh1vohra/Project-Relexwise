@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     max_concurrent_processes: int = 3
     
     # ChromaDB settings
-    chroma_persist_directory: str = "chroma_db"
+    chroma_persist_directory: str = os.getenv("CHROMA_PERSIST_DIRECTORY", "chroma_db")
     
     # File upload settings
     max_file_size: int = 50 * 1024 * 1024  # 50MB

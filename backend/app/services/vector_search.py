@@ -24,7 +24,7 @@ Settings.chunk_overlap = 200
 class VectorSearchService:
     def __init__(self):
         # --- PERSISTENT STORAGE ---
-        self.db = chromadb.PersistentClient(path="./chroma2_db")
+        self.db = chromadb.PersistentClient(path=settings.chroma_persist_directory)
         self.collection_name = "contract_docs"
         self.chroma_collection = self.db.get_or_create_collection(self.collection_name)
         self.vector_store = ChromaVectorStore(chroma_collection=self.chroma_collection)
