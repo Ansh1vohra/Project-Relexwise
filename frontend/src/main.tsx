@@ -11,6 +11,7 @@ import Insights from './pages/Insights'
 import Reports from './pages/Reports'
 import Settings from './pages/Settings'
 import AppLayout from './shared/AppLayout'
+import Header from './shared/Header'
 
 const router = createBrowserRouter([
 	{ path: '/', element: <Login /> },
