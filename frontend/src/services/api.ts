@@ -91,11 +91,25 @@ class ApiService {
       formData.append('files', file);
     });
 
-    return this.makeRequest('/api/v1/upload', {
-      method: 'POST',
-      body: formData,
-      headers: {}, // Don't set Content-Type, let browser set it for FormData
-    });
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/v1/upload`, {
+        method: 'POST',
+        body: formData,
+        // Don't set Content-Type header, let browser handle it for FormData
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return { data };
+    } catch (error) {
+      console.error('Upload request failed:', error);
+      return { 
+        error: error instanceof Error ? error.message : 'Upload failed' 
+      };
+    }
   }
 
   // Health check

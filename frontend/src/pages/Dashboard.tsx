@@ -36,7 +36,7 @@ const Dashboard = () => {
   
   // UI State
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'Active' | 'Expiring Soon' | 'Expired' | 'Draft' | 'All'>('All');
+  const [statusFilters, setStatusFilters] = useState<string[]>([]);
 
   // Load contract data on component mount
   useEffect(() => {
@@ -153,14 +153,57 @@ const Dashboard = () => {
     const matchesSearch = contract.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          contract.vendor.toLowerCase().includes(searchTerm.toLowerCase());
     
-    if (statusFilter === 'All') return matchesSearch;
-    if (statusFilter === 'Active') return matchesSearch && contract.status === 'Active';
-    if (statusFilter === 'Expiring Soon') return matchesSearch && (contract.status === 'Expiring' || contract.status === 'Expired');
-    if (statusFilter === 'Expired') return matchesSearch && contract.status === 'Expired';
-    if (statusFilter === 'Draft') return matchesSearch && contract.status === 'Draft';
+    // If no status filters are selected, show all contracts
+    if (statusFilters.length === 0) return matchesSearch;
     
-    return matchesSearch;
+    // Check if contract status matches any of the selected filters
+    return matchesSearch && statusFilters.some(filter => {
+      if (filter === 'Active') return contract.status === 'Active';
+      if (filter === 'Expiring Soon') return contract.status === 'Expiring' || contract.status === 'Expired';
+      if (filter === 'Expired') return contract.status === 'Expired';
+      if (filter === 'Draft') return contract.status === 'Draft';
+      return false;
+    });
   });
+
+  // Calculate dynamic metrics based on filtered contracts
+  const filteredMetrics = React.useMemo(() => {
+    // Calculate total value from filtered contracts
+    let totalValueNum = 0;
+    filteredContracts.forEach(contract => {
+      if (contract.contractValue && contract.contractValue !== 'N/A') {
+        // Remove currency symbols, commas, and non-numeric characters except decimal point and negative sign
+        let cleanValue = contract.contractValue
+          .replace(/[$,€£¥₹]/g, '') // Remove common currency symbols
+          .replace(/[^0-9.-]/g, ''); // Remove any other non-numeric characters
+        
+        // Handle values with 'K', 'M', 'B' suffixes
+        const multiplier = cleanValue.includes('K') ? 1000 : 
+                         cleanValue.includes('M') ? 1000000 : 
+                         cleanValue.includes('B') ? 1000000000 : 1;
+        
+        cleanValue = cleanValue.replace(/[KMB]/gi, '');
+        const value = parseFloat(cleanValue) * multiplier;
+        
+        if (!isNaN(value) && value > 0) {
+          totalValueNum += value;
+        }
+      }
+    });
+    
+    // Format total value display
+    const formattedValue = totalValueNum > 0 ? 
+      totalValueNum >= 1000000000 ? `$${(totalValueNum / 1000000000).toFixed(1)}B` :
+      totalValueNum >= 1000000 ? `$${(totalValueNum / 1000000).toFixed(1)}M` :
+      totalValueNum >= 1000 ? `$${(totalValueNum / 1000).toFixed(1)}K` :
+      `$${totalValueNum.toFixed(0)}` : '$0';
+    
+    return {
+      totalValue: formattedValue,
+      contractCount: filteredContracts.length,
+      vendorCount: new Set(filteredContracts.map(c => c.vendor)).size
+    };
+  }, [filteredContracts]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
@@ -187,64 +230,59 @@ const Dashboard = () => {
 
         {/* Status Tabs */}
         <div className="flex flex-wrap items-center gap-4 mb-8">
-          {(['All', 'Active','Expiring Soon','Expired','Draft'] as const).map(tab => (
+          {(['Active','Expiring Soon','Expired','Draft'] as const).map(tab => (
             <button
               key={tab}
-              onClick={() => setStatusFilter(tab)}
-              className={`${statusFilter===tab ? 'bg-blue-600/90 text-white' : 'bg-blue-100 text-blue-800'} px-6 py-2.5 rounded-xl shadow-sm hover:opacity-95 transition`}
+              onClick={() => {
+                setStatusFilters(prev => 
+                  prev.includes(tab) 
+                    ? prev.filter(f => f !== tab)  // Remove if already selected
+                    : [...prev, tab]              // Add if not selected
+                );
+              }}
+              className={`${statusFilters.includes(tab) ? 'bg-blue-600/90 text-white' : 'bg-blue-100 text-blue-800'} px-6 py-2.5 rounded-xl shadow-sm hover:opacity-95 transition`}
             >
               {tab}
             </button>
           ))}
+          {statusFilters.length > 0 && (
+            <button
+              onClick={() => setStatusFilters([])}
+              className="text-sm text-gray-600 hover:text-gray-800 underline"
+            >
+              Clear all filters
+            </button>
+          )}
         </div>
 
         {/* Key Metrics */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-            <div className="flex items-center justify-between mb-4">
-              <div className="p-2 bg-blue-100 rounded-lg">
-                <FileText className="w-6 h-6 text-blue-600" />
+        <div className="mb-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+          <div className="bg-green-50 border border-green-200 rounded-xl p-5">
+            <div className="flex items-center space-x-3 mb-2">
+              <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center">
+                <DollarSign className="w-5 h-5 text-green-700" />
               </div>
-              <TrendingUp className="w-5 h-5 text-green-500" />
+              <div className="text-sm font-medium text-green-900">Total Contract Value</div>
             </div>
-            <h3 className="text-2xl font-bold text-gray-900 mb-1">{loading ? '...' : activeContracts}</h3>
-            <p className="text-gray-600 text-sm">Active Contracts</p>
-            <div className="mt-2 text-xs text-green-600">+12% from last month</div>
+            <div className="text-3xl font-bold text-green-900">{loading ? '...' : filteredMetrics.totalValue}</div>
           </div>
-
-          <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-            <div className="flex items-center justify-between mb-4">
-              <div className="p-2 bg-green-100 rounded-lg">
-                <DollarSign className="w-6 h-6 text-green-600" />
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-5">
+            <div className="flex items-center space-x-3 mb-2">
+              <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center">
+                <FileText className="w-5 h-5 text-blue-700" />
               </div>
-              <TrendingUp className="w-5 h-5 text-green-500" />
+              <div className="text-sm font-medium text-blue-900">Number of Contracts</div>
             </div>
-            <h3 className="text-2xl font-bold text-gray-900 mb-1">{loading ? '...' : totalValue}</h3>
-            <p className="text-gray-600 text-sm">Total Contract Value</p>
-            <div className="mt-2 text-xs text-green-600">+8% portfolio growth</div>
+            <div className="text-3xl font-bold text-blue-900">{loading ? '...' : filteredMetrics.contractCount}</div>
           </div>
-
-          <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-            <div className="flex items-center justify-between mb-4">
-              <div className="p-2 bg-orange-100 rounded-lg">
-                <Clock className="w-6 h-6 text-orange-600" />
+          <div className="bg-rose-50 border border-rose-200 rounded-xl p-5">
+            <div className="flex items-center space-x-3 mb-2">
+              <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center">
+                <FileText className="w-5 h-5 text-rose-700" />
               </div>
-              <AlertTriangle className="w-5 h-5 text-orange-500" />
+              <div className="text-sm font-medium text-rose-900">Number of Vendors</div>
             </div>
-            <h3 className="text-2xl font-bold text-gray-900 mb-1">{loading ? '...' : expiringContracts}</h3>
-            <p className="text-gray-600 text-sm">Expiring Soon</p>
-            <div className="mt-2 text-xs text-orange-600">Next 90 days</div>
-          </div>
-
-          <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-            <div className="flex items-center justify-between mb-4">
-              <div className="p-2 bg-rose-100 rounded-lg">
-                <FileText className="w-6 h-6 text-rose-600" />
-              </div>
-            </div>
-            <h3 className="text-2xl font-bold text-gray-900 mb-1">{loading ? '...' : new Set(contractData.map(c=>c.vendor)).size}</h3>
-            <p className="text-gray-600 text-sm">Number of Vendors</p>
-            <div className="mt-2 text-xs text-blue-600">Unique vendors</div>
+            <div className="text-3xl font-bold text-rose-900">{loading ? '...' : filteredMetrics.vendorCount}</div>
           </div>
         </div>
 

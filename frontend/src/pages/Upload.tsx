@@ -1,12 +1,30 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { apiService } from '../services/api'
 
 export default function Upload() {
+  const navigate = useNavigate()
   const [files, setFiles] = useState<File[]>([])
   const [progress, setProgress] = useState(0)
   const [error, setError] = useState('')
   const [done, setDone] = useState('')
   const [isDragOver, setIsDragOver] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [apiStatus, setApiStatus] = useState<'checking' | 'online' | 'offline'>('checking')
   const inputRef = useRef<HTMLInputElement>(null)
+
+  // Check API health on component mount
+  useEffect(() => {
+    const checkApiHealth = async () => {
+      try {
+        const response = await apiService.healthCheck()
+        setApiStatus(response.error ? 'offline' : 'online')
+      } catch {
+        setApiStatus('offline')
+      }
+    }
+    checkApiHealth()
+  }, [])
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault()
@@ -15,7 +33,7 @@ export default function Upload() {
     const fileList = Array.from(e.dataTransfer.files)
     const validFiles = fileList.filter(f => 
       f.type === 'application/pdf' || 
-      f.name.endsWith('.txt') || 
+      // f.name.endsWith('.txt') || 
       f.name.endsWith('.docx')
     )
     
@@ -56,38 +74,55 @@ export default function Upload() {
   const onUpload = async () => {
     if (files.length === 0) return
 
-    setError(''); setDone(''); setProgress(0)
+    setError(''); setDone(''); setProgress(0); setUploading(true)
     
     try {
-      // Simulate upload progress
-      const progressInterval = setInterval(() => {
-        setProgress(prev => {
-          if (prev >= 90) {
-            clearInterval(progressInterval)
-            return 90
-          }
-          return prev + 10
-        })
-      }, 200)
-
-      // Simulate upload delay
-      await new Promise(resolve => setTimeout(resolve, 2000))
-      clearInterval(progressInterval)
-      setProgress(100)
-      await new Promise(resolve => setTimeout(resolve, 500))
+      // Start progress indication
+      setProgress(10)
       
-      setDone(`${files.length} contract${files.length > 1 ? 's' : ''} uploaded successfully! Processing for analysis...`)
+      // Upload files using API
+      const response = await apiService.uploadFiles(files)
+      
+      setProgress(60)
+      
+      if (response.error) {
+        throw new Error(response.error)
+      }
+      
+      setProgress(90)
+      
+      // Check response data
+      if (response.data) {
+        const { uploaded_files = [], failed_uploads = [] } = response.data
+        
+        if (failed_uploads.length > 0) {
+          const errorMessages = failed_uploads.map((fail: any) => 
+            `${fail.filename}: ${fail.error}`
+          ).join(', ')
+          throw new Error(`Some uploads failed: ${errorMessages}`)
+        }
+        
+        // Success
+        setProgress(100)
+        setDone(`${uploaded_files.length} contract${uploaded_files.length > 1 ? 's' : ''} uploaded successfully! Processing for analysis...`)
+      } else {
+        setProgress(100)
+        setDone(`${files.length} contract${files.length > 1 ? 's' : ''} uploaded successfully! Processing for analysis...`)
+      }
       
       // Reset form after success
       setTimeout(() => {
         setFiles([])
         setProgress(0)
         setDone('')
+        setUploading(false)
       }, 3000)
       
     } catch (err: any) {
-      setError('Upload failed. Please try again.')
+      console.error('Upload error:', err)
+      setError(err.message || 'Upload failed. Please try again.')
       setProgress(0)
+      setUploading(false)
     }
   }
 
@@ -97,6 +132,26 @@ export default function Upload() {
       <div className="text-center mb-8">
         <h1 className="text-3xl font-bold text-gray-900 mb-4">Upload Contracts</h1>
         <p className="text-gray-600">Upload your contract documents for AI-powered analysis</p>
+        
+        {/* API Status Indicator */}
+        <div className="mt-4 flex items-center justify-center">
+          <div className={`flex items-center space-x-2 px-3 py-1 rounded-full text-sm ${
+            apiStatus === 'online' ? 'bg-green-100 text-green-800' :
+            apiStatus === 'offline' ? 'bg-red-100 text-red-800' :
+            'bg-yellow-100 text-yellow-800'
+          }`}>
+            <div className={`w-2 h-2 rounded-full ${
+              apiStatus === 'online' ? 'bg-green-500' :
+              apiStatus === 'offline' ? 'bg-red-500' :
+              'bg-yellow-500'
+            }`}></div>
+            <span>
+              {apiStatus === 'online' ? 'Backend Connected' :
+               apiStatus === 'offline' ? 'Backend Offline' :
+               'Checking Connection...'}
+            </span>
+          </div>
+        </div>
       </div>
 
       {/* Upload Zone */}
@@ -182,10 +237,12 @@ export default function Upload() {
       {files.length > 0 && (
         <button
           onClick={onUpload}
-          disabled={progress > 0}
+          disabled={uploading || progress > 0 || apiStatus !== 'online'}
           className="w-full bg-blue-600 text-white py-3 px-6 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
-          {progress > 0 ? 'Uploading...' : `Upload ${files.length} Contract${files.length > 1 ? 's' : ''}`}
+          {uploading || progress > 0 ? 'Uploading...' : 
+           apiStatus !== 'online' ? 'Backend Unavailable' :
+           `Upload ${files.length} Contract${files.length > 1 ? 's' : ''}`}
         </button>
       )}
 
@@ -208,11 +265,19 @@ export default function Upload() {
       {/* Success Message */}
       {done && (
         <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg">
-          <div className="flex items-center">
-            <svg className="w-5 h-5 text-green-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-            </svg>
-            <span className="text-green-800">{done}</span>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              <svg className="w-5 h-5 text-green-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+              <span className="text-green-800">{done}</span>
+            </div>
+            <button
+              onClick={() => navigate('/app/dashboard')}
+              className="ml-4 bg-green-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-green-700 transition-colors"
+            >
+              View Dashboard
+            </button>
           </div>
         </div>
       )}
