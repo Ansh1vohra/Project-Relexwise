@@ -134,7 +134,7 @@ export default function Upload() {
         <p className="text-gray-600">Upload your contract documents for AI-powered analysis</p>
         
         {/* API Status Indicator */}
-        <div className="mt-4 flex items-center justify-center">
+        {/* <div className="mt-4 flex items-center justify-center">
           <div className={`flex items-center space-x-2 px-3 py-1 rounded-full text-sm ${
             apiStatus === 'online' ? 'bg-green-100 text-green-800' :
             apiStatus === 'offline' ? 'bg-red-100 text-red-800' :
@@ -151,7 +151,7 @@ export default function Upload() {
                'Checking Connection...'}
             </span>
           </div>
-        </div>
+        </div> */}
       </div>
 
       {/* Upload Zone */}

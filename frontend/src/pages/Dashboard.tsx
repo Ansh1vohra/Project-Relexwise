@@ -37,6 +37,8 @@ const Dashboard = () => {
   // UI State
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilters, setStatusFilters] = useState<string[]>([]);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage] = useState(10);
 
   // Load contract data on component mount
   useEffect(() => {
@@ -48,7 +50,8 @@ const Dashboard = () => {
       setLoading(true);
       setError(null);
       
-      const response = await apiService.getContractFiles(50, 0);
+      // Load all contracts (increase limit to get all available)
+      const response = await apiService.getContractFiles(100, 0);
       
       if (response.error) {
         setError(response.error);
@@ -205,6 +208,33 @@ const Dashboard = () => {
     };
   }, [filteredContracts]);
 
+  // Pagination calculations
+  const totalPages = Math.ceil(filteredContracts.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const currentContracts = filteredContracts.slice(startIndex, endIndex);
+
+  // Reset to first page when filters change
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [statusFilters, searchTerm]);
+
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+  };
+
+  const handlePreviousPage = () => {
+    if (currentPage > 1) {
+      setCurrentPage(currentPage - 1);
+    }
+  };
+
+  const handleNextPage = () => {
+    if (currentPage < totalPages) {
+      setCurrentPage(currentPage + 1);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
       
@@ -292,7 +322,14 @@ const Dashboard = () => {
             <div className="flex items-center justify-between mb-6">
               <div>
                 <h3 className="text-lg font-semibold text-gray-900">Contract Details</h3>
-                <p className="text-sm text-gray-500">Complete contract information with metadata</p>
+                <p className="text-sm text-gray-500">
+                  Complete contract information with metadata 
+                  {filteredContracts.length !== contractData.length && (
+                    <span className="text-blue-600 font-medium">
+                      • {filteredContracts.length} of {contractData.length} contracts shown
+                    </span>
+                  )}
+                </p>
               </div>
               <div className="flex items-center space-x-3">
                 <button 
@@ -351,6 +388,17 @@ const Dashboard = () => {
                 <p className="text-sm text-gray-400 mt-2">
                   {contractData.length === 0 ? 'Upload some contracts to get started' : 'Try adjusting your search or filter criteria'}
                 </p>
+                {statusFilters.length > 0 || searchTerm && (
+                  <button
+                    onClick={() => {
+                      setStatusFilters([]);
+                      setSearchTerm('');
+                    }}
+                    className="mt-3 text-blue-600 hover:text-blue-800 text-sm underline"
+                  >
+                    Clear all filters
+                  </button>
+                )}
               </div>
             ) : (
               <table className="w-full">
@@ -373,7 +421,7 @@ const Dashboard = () => {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {filteredContracts.slice(0, 10).map((contract, index) => (
+                  {currentContracts.map((contract, index) => (
                     <tr key={contract.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap">
                         <input type="checkbox" className="rounded border-gray-300" />
@@ -439,15 +487,77 @@ const Dashboard = () => {
           <div className="px-6 py-4 border-t border-gray-200 bg-gray-50">
             <div className="flex items-center justify-between">
               <div className="text-sm text-gray-700">
-                Showing <span className="font-medium">1</span> to <span className="font-medium">{Math.min(10, filteredContracts.length)}</span> of{' '}
+                Showing <span className="font-medium">{startIndex + 1}</span> to <span className="font-medium">{Math.min(endIndex, filteredContracts.length)}</span> of{' '}
                 <span className="font-medium">{filteredContracts.length}</span> contracts
               </div>
               <div className="flex items-center space-x-2">
-                <button className="px-3 py-1 text-sm text-gray-600 border border-gray-300 rounded hover:bg-gray-100">
+                <button 
+                  onClick={handlePreviousPage}
+                  disabled={currentPage === 1}
+                  className="px-3 py-1 text-sm text-gray-600 border border-gray-300 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
                   Previous
                 </button>
-                <button className="px-3 py-1 text-sm bg-blue-600 text-white rounded">1</button>
-                <button className="px-3 py-1 text-sm text-gray-600 border border-gray-300 rounded hover:bg-gray-100">
+                
+                {/* Page Numbers */}
+                <div className="flex items-center space-x-1">
+                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                    const pageNumber = i + 1;
+                    if (totalPages <= 5) {
+                      return (
+                        <button
+                          key={pageNumber}
+                          onClick={() => handlePageChange(pageNumber)}
+                          className={`px-3 py-1 text-sm rounded ${
+                            currentPage === pageNumber
+                              ? 'bg-blue-600 text-white'
+                              : 'text-gray-600 border border-gray-300 hover:bg-gray-100'
+                          }`}
+                        >
+                          {pageNumber}
+                        </button>
+                      );
+                    } else {
+                      // Handle pagination with ellipsis for many pages
+                      let pageToShow = pageNumber;
+                      if (currentPage > 3) {
+                        pageToShow = currentPage - 2 + i;
+                      }
+                      if (pageToShow > totalPages) return null;
+                      
+                      return (
+                        <button
+                          key={pageToShow}
+                          onClick={() => handlePageChange(pageToShow)}
+                          className={`px-3 py-1 text-sm rounded ${
+                            currentPage === pageToShow
+                              ? 'bg-blue-600 text-white'
+                              : 'text-gray-600 border border-gray-300 hover:bg-gray-100'
+                          }`}
+                        >
+                          {pageToShow}
+                        </button>
+                      );
+                    }
+                  })}
+                  {totalPages > 5 && currentPage < totalPages - 2 && (
+                    <>
+                      <span className="text-gray-500">...</span>
+                      <button
+                        onClick={() => handlePageChange(totalPages)}
+                        className="px-3 py-1 text-sm text-gray-600 border border-gray-300 rounded hover:bg-gray-100"
+                      >
+                        {totalPages}
+                      </button>
+                    </>
+                  )}
+                </div>
+                
+                <button 
+                  onClick={handleNextPage}
+                  disabled={currentPage === totalPages || totalPages === 0}
+                  className="px-3 py-1 text-sm text-gray-600 border border-gray-300 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
                   Next
                 </button>
               </div>

@@ -184,6 +184,7 @@ class ProcessingQueue:
         db_metadata = FileMetadata(
             id=str(uuid.uuid4()),
             file_id=file_id,
+            contract_name=metadata.get("contract_name"),
             start_date=metadata.get("start_date"),
             end_date=metadata.get("end_date"),
             vendor_name=metadata.get("vendor_name"),
@@ -194,6 +195,7 @@ class ProcessingQueue:
             contract_status=metadata.get("contract_status"),
             contract_type=metadata.get("contract_type"),
             scope_of_services=metadata.get("scope_of_services"),
+            contract_tag=metadata.get("contract_tag"),
             contract_value=metadata.get("contract_value"),  # Legacy field for backward compatibility
             raw_text_length=text_length,
             extraction_timestamp=datetime.utcnow()
