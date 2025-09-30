@@ -28,34 +28,133 @@ import {
   Globe,
   ArrowDown
 } from 'lucide-react';
+import { apiService, ContractFile, ContractFileWithMetadata } from '../services/api';
 
 const Dashboard = () => {
-  const [activeContracts] = useState(247);
-  const [totalValue] = useState('$12.4M');
-  const [expiringContracts] = useState(23);
-  const [riskScore] = useState(7.2);
+  const [contractFiles, setContractFiles] = useState<ContractFileWithMetadata[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  
+  // Calculate metrics from real data
+  const [activeContracts, setActiveContracts] = useState(0);
+  const [totalValue, setTotalValue] = useState('$0');
+  const [expiringContracts, setExpiringContracts] = useState(0);
+  const [riskScore] = useState(7.2); // This could be calculated from metadata in the future
 
-  // Sample contract data
-  const contractData = [
-    { id: 1, name: "TeleCo Master Service Agreement", vendor: "TeleCo Ltd", value: "$2.4M", status: "Active", expiry: "2025-06-30", risk: "Low", type: "MSA" },
-    { id: 2, name: "CloudTech Infrastructure Contract", vendor: "CloudTech Inc", value: "$1.8M", status: "Active", expiry: "2025-12-15", risk: "Medium", type: "Service" },
-    { id: 3, name: "DataFlow Analytics License", vendor: "DataFlow Corp", value: "$850K", status: "Expiring", expiry: "2025-10-01", risk: "High", type: "License" },
-    { id: 4, name: "SecureNet Cybersecurity Services", vendor: "SecureNet Ltd", value: "$1.2M", status: "Active", expiry: "2026-03-20", risk: "Low", type: "Service" },
-    { id: 5, name: "OfficeSpace Lease Agreement", vendor: "PropertyCorp", value: "$3.1M", status: "Active", expiry: "2025-08-31", risk: "Medium", type: "Lease" },
-    { id: 6, name: "Marketing Services Contract", vendor: "AdTech Solutions", value: "$950K", status: "Active", expiry: "2025-11-15", risk: "Low", type: "Service" },
-    { id: 7, name: "IT Support Agreement", vendor: "TechSupport Pro", value: "$1.4M", status: "Active", expiry: "2026-01-10", risk: "Medium", type: "Support" },
-    { id: 8, name: "Legal Advisory Retainer", vendor: "LawFirm Associates", value: "$680K", status: "Expiring", expiry: "2025-09-30", risk: "High", type: "Legal" }
-  ];
+  // Load contract data on component mount
+  useEffect(() => {
+    loadContractData();
+  }, []);
+
+  const loadContractData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const response = await apiService.getContractFiles(50, 0);
+      
+      if (response.error) {
+        setError(response.error);
+        return;
+      }
+      
+      if (response.data) {
+        setContractFiles(response.data);
+        
+        // Calculate metrics from metadata
+        const completedFiles = response.data.filter(file => 
+          file.metadata_processing_status === 'completed'
+        );
+        
+        setActiveContracts(completedFiles.length);
+        
+        // Calculate total value from Contract Value column (contract_value field)
+        let totalValueNum = 0;
+        completedFiles.forEach(file => {
+          const metadata = file.file_metadata;
+          if (metadata?.contract_value && metadata.contract_value !== 'N/A') {
+            // Remove currency symbols, commas, and non-numeric characters except decimal point and negative sign
+            let cleanValue = metadata.contract_value
+              .replace(/[$,€£¥₹]/g, '') // Remove common currency symbols
+              .replace(/[^0-9.-]/g, ''); // Remove any other non-numeric characters
+            
+            // Handle values with 'K', 'M', 'B' suffixes
+            const multiplier = cleanValue.includes('K') ? 1000 : 
+                             cleanValue.includes('M') ? 1000000 : 
+                             cleanValue.includes('B') ? 1000000000 : 1;
+            
+            cleanValue = cleanValue.replace(/[KMB]/gi, '');
+            const value = parseFloat(cleanValue) * multiplier;
+            
+            if (!isNaN(value) && value > 0) {
+              totalValueNum += value;
+            }
+          }
+        });
+        
+        // Format total value display
+        setTotalValue(totalValueNum > 0 ? 
+          totalValueNum >= 1000000000 ? `$${(totalValueNum / 1000000000).toFixed(1)}B` :
+          totalValueNum >= 1000000 ? `$${(totalValueNum / 1000000).toFixed(1)}M` :
+          totalValueNum >= 1000 ? `$${(totalValueNum / 1000).toFixed(1)}K` :
+          `$${totalValueNum.toFixed(0)}` : '$0');
+        
+        // Calculate expiring contracts (next 90 days)
+        const currentDate = new Date();
+        const ninetyDaysFromNow = new Date(currentDate.getTime() + (90 * 24 * 60 * 60 * 1000));
+        
+        const expiring = completedFiles.filter(file => {
+          const metadata = file.file_metadata;
+          if (metadata?.end_date) {
+            const endDate = new Date(metadata.end_date);
+            return endDate <= ninetyDaysFromNow && endDate > currentDate;
+          }
+          return false;
+        });
+        
+        setExpiringContracts(expiring.length);
+      }
+    } catch (err) {
+      setError('Failed to load contract data');
+      console.error('Error loading contracts:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Transform API data to display format for the table
+  const contractData = contractFiles.map((file, index) => {
+    const metadata = file.file_metadata;
+    
+    return {
+      id: index + 1,
+      name: file.filename.replace('.pdf', ''),
+      vendor: metadata?.vendor_name || 'N/A',
+      contractValue: metadata?.contract_value || 'N/A', // Main contract value field
+      contractValueLocal: metadata?.contract_value_local || 'N/A', // Separate local value
+      currency: metadata?.currency || 'N/A', // Separate currency
+      status: metadata?.contract_status || 'N/A',
+      type: metadata?.contract_type || 'N/A', // Contract type as separate field
+      fileId: file.id,
+      uploadDate: new Date(file.upload_timestamp).toLocaleDateString(),
+      startDate: metadata?.start_date || 'N/A',
+      endDate: metadata?.end_date || 'N/A',
+      duration: metadata?.contract_duration || 'N/A',
+      scope: metadata?.scope_of_services || 'N/A',
+      confidenceScore: metadata?.confidence_score || null,
+      hasMetadata: !!metadata
+    };
+  });
 
   // Recent activity data
-  const recentActivity = [
-    { id: 1, user: "John Smith", action: "uploaded", item: "Service Agreement", date: "2 hours ago", category: "Contract" },
-    { id: 2, user: "Sarah Wilson", action: "reviewed", item: "NDA Document", date: "4 hours ago", category: "Legal" },
-    { id: 3, user: "Mike Chen", action: "approved", item: "Vendor Contract", date: "6 hours ago", category: "Procurement" },
-    { id: 4, user: "Lisa Brown", action: "flagged", item: "High Risk Contract", date: "8 hours ago", category: "Risk" },
-    { id: 5, user: "David Lee", action: "renewed", item: "Software License", date: "1 day ago", category: "License" },
-    { id: 6, user: "Emma Davis", action: "exported", item: "Monthly Report", date: "1 day ago", category: "Report" }
-  ];
+  // const recentActivity = [
+  //   { id: 1, user: "John Smith", action: "uploaded", item: "Service Agreement", date: "2 hours ago", category: "Contract" },
+  //   { id: 2, user: "Sarah Wilson", action: "reviewed", item: "NDA Document", date: "4 hours ago", category: "Legal" },
+  //   { id: 3, user: "Mike Chen", action: "approved", item: "Vendor Contract", date: "6 hours ago", category: "Procurement" },
+  //   { id: 4, user: "Lisa Brown", action: "flagged", item: "High Risk Contract", date: "8 hours ago", category: "Risk" },
+  //   { id: 5, user: "David Lee", action: "renewed", item: "Software License", date: "1 day ago", category: "License" },
+  //   { id: 6, user: "Emma Davis", action: "exported", item: "Monthly Report", date: "1 day ago", category: "Report" }
+  // ];
 
   // Calendar opener component
   const CalendarOpener = () => {
@@ -163,7 +262,7 @@ const Dashboard = () => {
             <div className="mt-2 text-xs text-orange-600">Next 90 days</div>
           </div>
 
-          <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+          {/* <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
             <div className="flex items-center justify-between mb-4">
               <div className="p-2 bg-red-100 rounded-lg">
                 <Shield className="w-6 h-6 text-red-600" />
@@ -173,19 +272,19 @@ const Dashboard = () => {
             <h3 className="text-2xl font-bold text-gray-900 mb-1">{riskScore}/10</h3>
             <p className="text-gray-600 text-sm">Average Risk Score</p>
             <div className="mt-2 text-xs text-red-600">4 contracts need review</div>
-          </div>
+          </div> */}
         </div>
 
-        {/* Main Content Grid - Active Contracts moved to left side */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
+        {/* Main Content Grid - Contract table takes full width */}
+        <div className="grid grid-cols-1 gap-8 mb-8">
           
-          {/* Active Contracts Table - Moved here */}
-          <div className="lg:col-span-2 bg-white border border-gray-200 rounded-xl overflow-hidden">
+          {/* Active Contracts Table - Full width */}
+          <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
             <div className="p-6 border-b border-gray-200">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="text-lg font-semibold text-gray-900">Active Contracts</h3>
-                  <p className="text-sm text-gray-600 mt-1">Use bulk actions to renew, export, or tag contracts faster</p>
+                  <h3 className="text-lg font-semibold text-gray-900">Contract Details</h3>
+                  <p className="text-sm text-gray-600 mt-1">Complete contract information with metadata</p>
                 </div>
                 <div className="flex items-center space-x-3">
                   <div className="relative">
@@ -199,6 +298,14 @@ const Dashboard = () => {
                   <button className="p-2 border border-gray-300 rounded-lg hover:bg-gray-50">
                     <Filter className="w-4 h-4 text-gray-600" />
                   </button>
+                  <button 
+                    onClick={loadContractData}
+                    disabled={loading}
+                    className="p-2 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                    title="Refresh contracts"
+                  >
+                    <Activity className={`w-4 h-4 text-gray-600 ${loading ? 'animate-spin' : ''}`} />
+                  </button>
                   <button className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm">
                     Export CSV
                   </button>
@@ -207,75 +314,122 @@ const Dashboard = () => {
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      <input type="checkbox" className="rounded border-gray-300" />
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contract</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Parties</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Value</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Expiry</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Risk</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {contractData.slice(0, 6).map((contract, index) => (
-                    <tr key={contract.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap">
+              {loading ? (
+                <div className="flex justify-center items-center py-12">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                  <span className="ml-3 text-gray-600">Loading contracts...</span>
+                </div>
+              ) : error ? (
+                <div className="flex flex-col justify-center items-center py-12">
+                  <AlertTriangle className="w-12 h-12 text-red-500 mb-4" />
+                  <p className="text-red-600 mb-4">{error}</p>
+                  <button 
+                    onClick={loadContractData}
+                    className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+                  >
+                    Retry
+                  </button>
+                </div>
+              ) : contractData.length === 0 ? (
+                <div className="flex flex-col justify-center items-center py-12">
+                  <FileText className="w-12 h-12 text-gray-400 mb-4" />
+                  <p className="text-gray-500">No contracts found</p>
+                  <p className="text-sm text-gray-400 mt-2">Upload some contracts to get started</p>
+                </div>
+              ) : (
+                <table className="w-full">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         <input type="checkbox" className="rounded border-gray-300" />
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div>
-                          <div className="text-sm font-medium text-gray-900">{contract.name}</div>
-                          <div className="text-sm text-gray-500">{contract.type}</div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{contract.vendor}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{contract.value}</td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                          contract.status === 'Active' ? 'bg-green-100 text-green-800' :
-                          contract.status === 'Expiring' ? 'bg-orange-100 text-orange-800' :
-                          'bg-gray-100 text-gray-800'
-                        }`}>
-                          {contract.status}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{contract.expiry}</td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                          contract.risk === 'Low' ? 'bg-green-100 text-green-800' :
-                          contract.risk === 'Medium' ? 'bg-yellow-100 text-yellow-800' :
-                          'bg-red-100 text-red-800'
-                        }`}>
-                          {contract.risk}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        <div className="flex items-center space-x-2">
-                          <button className="text-blue-600 hover:text-blue-900">
-                            <Eye className="w-4 h-4" />
-                          </button>
-                          <button className="text-gray-600 hover:text-gray-900">
-                            <Download className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </td>
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contract</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vendor</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contract Value</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Local Value</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Currency</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Start Date</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">End Date</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Duration</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Scope</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {contractData.slice(0, 6).map((contract, index) => (
+                      <tr key={contract.id} className="hover:bg-gray-50">
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <input type="checkbox" className="rounded border-gray-300" />
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div>
+                            <div className="text-sm font-medium text-gray-900" title={contract.name}>
+                              {contract.name.length > 30 ? `${contract.name.substring(0, 30)}...` : contract.name}
+                            </div>
+                            {/* <div className="text-sm text-gray-500">File ID: {contract.fileId.substring(0, 8)}</div> */}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{contract.type}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{contract.vendor}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{contract.contractValue}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{contract.contractValueLocal}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{contract.currency}</td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                            contract.status === 'Active' ? 'bg-green-100 text-green-800' :
+                            contract.status === 'Draft' ? 'bg-yellow-100 text-yellow-800' :
+                            contract.status === 'Expired' ? 'bg-red-100 text-red-800' :
+                            'bg-gray-100 text-gray-800'
+                          }`}>
+                            {contract.status}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{contract.startDate}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{contract.endDate}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {contract.duration}
+                          {contract.duration !== 'N/A' && !contract.duration.includes('year') && contract.duration !== 'N/A' && (
+                            <span className="text-xs text-gray-500 ml-1">years</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900" title={contract.scope}>
+                          {contract.scope.length > 15 ? `${contract.scope.substring(0, 15)}...` : contract.scope}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          <div className="flex items-center space-x-2">
+                            <button 
+                              className="text-blue-600 hover:text-blue-900"
+                              title={`View details${contract.confidenceScore ? ` (Confidence: ${(contract.confidenceScore * 100).toFixed(1)}%)` : ''}`}
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+                            <button 
+                              className="text-gray-600 hover:text-gray-900"
+                              title="Download"
+                            >
+                              <Download className="w-4 h-4" />
+                            </button>
+                            {!contract.hasMetadata && (
+                              <span className="text-xs text-orange-500" title="Metadata not extracted yet">
+                                ⚠️
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
 
             <div className="px-6 py-4 border-t border-gray-200 bg-gray-50">
               <div className="flex items-center justify-between">
                 <div className="text-sm text-gray-700">
-                  Showing <span className="font-medium">1</span> to <span className="font-medium">6</span> of{' '}
-                  <span className="font-medium">247</span> contracts
+                  Showing <span className="font-medium">1</span> to <span className="font-medium">{Math.min(6, contractData.length)}</span> of{' '}
+                  <span className="font-medium">{contractData.length}</span> contracts
                 </div>
                 <div className="flex items-center space-x-2">
                   <button className="px-3 py-1 text-sm text-gray-600 border border-gray-300 rounded hover:bg-gray-100">
@@ -283,17 +437,16 @@ const Dashboard = () => {
                   </button>
                   <button className="px-3 py-1 text-sm bg-blue-600 text-white rounded">1</button>
                   <button className="px-3 py-1 text-sm text-gray-600 border border-gray-300 rounded hover:bg-gray-100">
-                    2
-                  </button>
-                  <button className="px-3 py-1 text-sm text-gray-600 border border-gray-300 rounded hover:bg-gray-100">
                     Next
                   </button>
                 </div>
               </div>
             </div>
           </div>
+        </div>
 
-          {/* Recent Activity - Keep on right side */}
+        {/* Recent Activity and Quick Stats */}
+        {/* <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
           <div className="bg-white border border-gray-200 rounded-xl p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-gray-900">Recent Activity</h3>
@@ -319,7 +472,33 @@ const Dashboard = () => {
               ))}
             </div>
           </div>
-        </div>
+
+          <div className="bg-white border border-gray-200 rounded-xl p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">Contract Summary</h3>
+              <span className="text-xs text-gray-500">This month</span>
+            </div>
+            
+            <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-gray-600">Total Contracts</span>
+                <span className="font-semibold text-gray-900">{contractData.length}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-gray-600">Active Contracts</span>
+                <span className="font-semibold text-green-600">{contractData.filter(c => c.status === 'Active').length}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-gray-600">Expiring Soon</span>
+                <span className="font-semibold text-orange-600">{expiringContracts}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-gray-600">With Metadata</span>
+                <span className="font-semibold text-blue-600">{contractData.filter(c => c.hasMetadata).length}</span>
+              </div>
+            </div>
+          </div>
+        </div> */}
 
         {/* Upcoming Key Dates - Single row */}
         <div className="grid grid-cols-1 lg:grid-cols-1 gap-8 mb-8">
@@ -339,7 +518,7 @@ const Dashboard = () => {
                       <div className="text-xs text-gray-500">{d.type}</div>
                     </div>
                   </div>
-                  <span className="text-xs text-gray-600">{d.expiry ? new Date(d.expiry).toLocaleDateString() : 'Soon'}</span>
+                  <span className="text-xs text-gray-600">{d.endDate ? new Date(d.endDate).toLocaleDateString() : 'Soon'}</span>
                 </div>
               ))}
             </div>

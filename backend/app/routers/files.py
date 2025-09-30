@@ -109,17 +109,17 @@ async def upload_files(
         failed_uploads_count=len(failed_uploads)
     )
 
-@router.get("/files", response_model=List[FileSchema])
+@router.get("/files", response_model=List[FileWithMetadataSchema])
 async def get_files(
     limit: int = 50,
     offset: int = 0,
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Get list of uploaded files with their processing status
+    Get list of uploaded files with their processing status and metadata
     """
     try:
-        stmt = select(File).offset(offset).limit(limit)
+        stmt = select(File).options(selectinload(File.file_metadata)).offset(offset).limit(limit)
         result = await db.execute(stmt)
         files = result.scalars().all()
         
