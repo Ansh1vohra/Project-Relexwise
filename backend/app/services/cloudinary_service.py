@@ -35,9 +35,10 @@ class CloudinaryService:
             result = cloudinary.uploader.upload(
                 temp_file_path,
                 folder=self.folder,
-                resource_type="auto",
+                resource_type="raw",  # Use 'raw' for PDFs to ensure proper handling
                 public_id=f"{filename.split('.')[0]}_{os.urandom(4).hex()}",
-                overwrite=False
+                overwrite=False,
+                flags="attachment"  # This ensures the PDF opens properly in browser
             )
             
             # Clean up temporary file
@@ -74,5 +75,39 @@ class CloudinaryService:
         except Exception as e:
             logger.error(f"Error deleting {public_id} from Cloudinary: {str(e)}")
             return False
+    
+    def get_pdf_view_url(self, public_id: str) -> str:
+        """
+        Generate a URL for viewing PDF in browser
+        """
+        try:
+            # Generate URL with proper flags for PDF viewing
+            url = cloudinary.utils.cloudinary_url(
+                public_id,
+                resource_type="raw",
+                flags="attachment",
+                secure=True
+            )[0]
+            return url
+        except Exception as e:
+            logger.error(f"Error generating PDF view URL for {public_id}: {str(e)}")
+            return ""
+    
+    def get_pdf_download_url(self, public_id: str, filename: str) -> str:
+        """
+        Generate a URL for downloading PDF with proper filename
+        """
+        try:
+            # Generate URL with download flag and filename
+            url = cloudinary.utils.cloudinary_url(
+                public_id,
+                resource_type="raw",
+                flags=f"attachment:{filename}",
+                secure=True
+            )[0]
+            return url
+        except Exception as e:
+            logger.error(f"Error generating PDF download URL for {public_id}: {str(e)}")
+            return ""
 
 cloudinary_service = CloudinaryService()

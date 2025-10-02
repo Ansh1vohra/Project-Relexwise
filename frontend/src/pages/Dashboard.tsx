@@ -122,6 +122,128 @@ const Dashboard = () => {
     }
   };
 
+  // Handle file download
+  const handleDownload = async (fileId: string) => {
+    try {
+      const response = await apiService.getFileDownloadUrl(fileId);
+      if (response.data?.download_url) {
+        // Open download URL in new tab
+        const link = document.createElement('a');
+        link.href = response.data.download_url;
+        link.target = '_blank';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } else {
+        console.error('No download URL received');
+        alert('Failed to get download URL');
+      }
+    } catch (error) {
+      console.error('Error getting download URL:', error);
+      alert('Failed to download file');
+    }
+  };
+
+  // Handle file view
+  const handleView = async (fileId: string) => {
+    try {
+      const response = await apiService.getFileViewUrl(fileId);
+      if (response.data?.view_url) {
+        // Open view URL in new tab
+        window.open(response.data.view_url, '_blank');
+      } else {
+        console.error('No view URL received');
+        alert('Failed to get view URL');
+      }
+    } catch (error) {
+      console.error('Error getting view URL:', error);
+      alert('Failed to view file');
+    }
+  };
+
+  // Export contract data to CSV
+  const exportToCSV = () => {
+    try {
+      // Use filtered contracts for export
+      const dataToExport = filteredContracts;
+      
+      if (dataToExport.length === 0) {
+        alert('No data to export');
+        return;
+      }
+
+      // Helper function to format date strings
+      const formatDate = (dateString: string) => {
+        if (!dateString || dateString === 'N/A') return 'N/A';
+        
+        try {
+          // Try to parse the date and format it consistently
+          const date = new Date(dateString);
+          if (isNaN(date.getTime())) return dateString; // Return original if invalid
+          return date.toLocaleDateString(); // Format as MM/DD/YYYY or based on locale
+        } catch {
+          return dateString; // Return original if parsing fails
+        }
+      };
+
+      // Define CSV headers
+      const headers = [
+        'Contract Name',
+        'Type',
+        'Vendor',
+        'Contract Value',
+        'Currency',
+        'Status',
+        'Start Date',
+        'End Date',
+        'Duration',
+        'Scope of Services',
+        'Upload Date',
+        'Confidence Score'
+      ];
+
+      // Convert data to CSV rows
+      const csvRows = [
+        headers.join(','), // Header row
+        ...dataToExport.map(contract => [
+          `"${contract.name.replace(/"/g, '""')}"`, // Escape quotes in contract name
+          `"${contract.type}"`,
+          `"${contract.vendor.replace(/"/g, '""')}"`, // Escape quotes in vendor name
+          `"${contract.contractValue}"`,
+          `"${contract.currency}"`,
+          `"${contract.status}"`,
+          `"${formatDate(contract.startDate)}"`, // Format start date
+          `"${formatDate(contract.endDate)}"`, // Format end date
+          `"${contract.duration}"`,
+          `"${contract.scope.replace(/"/g, '""')}"`, // Escape quotes in scope
+          `"${contract.uploadDate}"`, // Upload date is already formatted
+          contract.confidenceScore ? `"${(contract.confidenceScore * 100).toFixed(1)}%"` : '"N/A"'
+        ].join(','))
+      ];
+
+      // Create CSV content
+      const csvContent = csvRows.join('\n');
+
+      // Create and download the file
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      
+      if (link.download !== undefined) {
+        const url = URL.createObjectURL(blob);
+        link.setAttribute('href', url);
+        link.setAttribute('download', `contracts_export_${new Date().toISOString().split('T')[0]}.csv`);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      }
+    } catch (error) {
+      console.error('Error exporting CSV:', error);
+      alert('Failed to export CSV');
+    }
+  };
+
   // Transform API data to display format for the table
   const contractData = contractFiles.map((file, index) => {
     const metadata = file.file_metadata;
@@ -136,6 +258,7 @@ const Dashboard = () => {
       currency: metadata?.currency || 'N/A', // Separate currency
       status: metadata?.contract_status || 'N/A',
       fileId: file.id,
+      cloudinaryUrl: file.cloudinary_url,
       uploadDate: new Date(file.upload_timestamp).toLocaleDateString(),
       startDate: metadata?.start_date || 'N/A',
       endDate: metadata?.end_date || 'N/A',
@@ -343,7 +466,16 @@ const Dashboard = () => {
                 <button className="p-2 border border-gray-300 rounded-lg hover:bg-gray-50">
                   <Filter className="w-4 h-4 text-gray-600" />
                 </button>
-                <button className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm">
+                <button 
+                  className={`px-4 py-2 rounded-lg text-sm transition-colors ${
+                    loading || filteredContracts.length === 0 
+                      ? 'bg-gray-400 text-gray-200 cursor-not-allowed' 
+                      : 'bg-blue-600 text-white hover:bg-blue-700'
+                  }`}
+                  onClick={exportToCSV}
+                  disabled={loading || filteredContracts.length === 0}
+                  title={filteredContracts.length === 0 ? 'No data to export' : 'Export filtered contracts to CSV'}
+                >
                   Export CSV
                 </button>
               </div>
@@ -428,9 +560,13 @@ const Dashboard = () => {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div>
-                          <div className="text-sm font-medium text-gray-900" title={contract.name}>
+                          <button 
+                            onClick={() => navigate(`/app/contracts/${contract.fileId}`)}
+                            className="text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline cursor-pointer text-left" 
+                            title={`View details for ${contract.name}`}
+                          >
                             {contract.name.length > 30 ? `${contract.name.substring(0, 30)}...` : contract.name}
-                          </div>
+                          </button>
                           <div className="text-sm text-gray-500">
                             {contract.hasMetadata ? `ID: ${contract.fileId.substring(0, 8)}` : 'Processing...'}
                           </div>
@@ -460,16 +596,18 @@ const Dashboard = () => {
                         <div className="flex items-center space-x-2">
                           <button 
                             className="text-blue-600 hover:text-blue-900"
-                            title={`View details${contract.confidenceScore ? ` (Confidence: ${(contract.confidenceScore * 100).toFixed(1)}%)` : ''}`}
+                            title={`View PDF${contract.confidenceScore ? ` (Confidence: ${(contract.confidenceScore * 100).toFixed(1)}%)` : ''}`}
+                            onClick={() => handleView(contract.fileId)}
                           >
-                            <Eye className="w-4 h-4" />
+                            <Download className="w-5 h-5" />
                           </button>
-                          <button 
+                          {/* <button 
                             className="text-gray-600 hover:text-gray-900"
-                            title="Download"
+                            title="Download PDF"
+                            onClick={() => handleDownload(contract.fileId)}
                           >
                             <Download className="w-4 h-4" />
-                          </button>
+                          </button> */}
                           {!contract.hasMetadata && (
                             <span className="text-xs text-orange-500" title="Metadata not extracted yet">
                               ⚠️

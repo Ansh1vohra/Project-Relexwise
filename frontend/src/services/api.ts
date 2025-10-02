@@ -18,6 +18,7 @@ export interface ContractFile {
 export interface FileMetadata {
   id: string;
   file_id: string;
+  contract_name?: string;
   start_date?: string;
   end_date?: string;
   vendor_name?: string;
@@ -28,6 +29,7 @@ export interface FileMetadata {
   contract_status?: string;
   contract_type?: string;
   scope_of_services?: string;
+  contract_tag?: string;
   contract_value?: string;
   extraction_timestamp: string;
   raw_text_length?: number;
@@ -115,6 +117,27 @@ class ApiService {
   // Health check
   async healthCheck(): Promise<ApiResponse<{ status: string }>> {
     return this.makeRequest<{ status: string }>('/health');
+  }
+
+  // Search within a specific contract using vector search
+  async searchInContract(fileId: string, query: string): Promise<ApiResponse<any>> {
+    return this.makeRequest(`/api/v1/search/query`, {
+      method: 'POST',
+      body: JSON.stringify({
+        file_id: fileId,
+        query: query
+      })
+    });
+  }
+
+  // Get PDF view URL
+  async getFileViewUrl(fileId: string): Promise<ApiResponse<{ view_url: string }>> {
+    return this.makeRequest(`/api/v1/files/${fileId}/view-url`);
+  }
+
+  // Get PDF download URL
+  async getFileDownloadUrl(fileId: string): Promise<ApiResponse<{ download_url: string }>> {
+    return this.makeRequest(`/api/v1/files/${fileId}/download-url`);
   }
 }
 
