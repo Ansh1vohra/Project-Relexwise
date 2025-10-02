@@ -19,6 +19,7 @@ import {
   Zap
 } from 'lucide-react';
 import { apiService, ContractFileWithMetadata } from '../services/api';
+import webSocketService from '../services/websocket';
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -43,6 +44,31 @@ const Dashboard = () => {
   // Load contract data on component mount
   useEffect(() => {
     loadContractData();
+    
+    // Set up WebSocket event listeners
+    const handleMetadataExtracted = (message: any) => {
+      console.log('Metadata extracted for file:', message.file_id);
+      // Refresh contract data to show updated metadata
+      loadContractData();
+    };
+
+    const handleFileProcessingUpdate = (message: any) => {
+      console.log('File processing update:', message);
+      if (message.status === 'metadata_completed') {
+        // Refresh contract data when metadata processing is complete
+        loadContractData();
+      }
+    };
+
+    // Add event listeners
+    webSocketService.onMetadataExtracted(handleMetadataExtracted);
+    webSocketService.onFileProcessingUpdate(handleFileProcessingUpdate);
+
+    // Cleanup on unmount
+    return () => {
+      webSocketService.off('metadata_extracted', handleMetadataExtracted);
+      webSocketService.off('file_processing_update', handleFileProcessingUpdate);
+    };
   }, []);
 
   const loadContractData = async () => {
@@ -125,22 +151,17 @@ const Dashboard = () => {
   // Handle file download
   const handleDownload = async (fileId: string) => {
     try {
-      const response = await apiService.getFileDownloadUrl(fileId);
-      if (response.data?.download_url) {
-        // Open download URL in new tab
-        const link = document.createElement('a');
-        link.href = response.data.download_url;
-        link.target = '_blank';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+      const response = await apiService.getFileViewUrl(fileId);
+      if (response.data?.view_url) {
+        // Open view URL in new tab
+        window.open(response.data.view_url, '_blank');
       } else {
-        console.error('No download URL received');
-        alert('Failed to get download URL');
+        console.error('No view URL received');
+        alert('Failed to get view URL');
       }
     } catch (error) {
-      console.error('Error getting download URL:', error);
-      alert('Failed to download file');
+      console.error('Error getting view URL:', error);
+      alert('Failed to view file');
     }
   };
 
@@ -599,7 +620,7 @@ const Dashboard = () => {
                             title={`View PDF${contract.confidenceScore ? ` (Confidence: ${(contract.confidenceScore * 100).toFixed(1)}%)` : ''}`}
                             onClick={() => handleView(contract.fileId)}
                           >
-                            <Download className="w-5 h-5" />
+                            <Download className="w-4 h-4" />
                           </button>
                           {/* <button 
                             className="text-gray-600 hover:text-gray-900"
@@ -609,9 +630,12 @@ const Dashboard = () => {
                             <Download className="w-4 h-4" />
                           </button> */}
                           {!contract.hasMetadata && (
-                            <span className="text-xs text-orange-500" title="Metadata not extracted yet">
-                              ⚠️
-                            </span>
+                            <div className="flex items-center space-x-1">
+                              <div className="w-3 h-3 border-2 border-orange-500 border-t-transparent rounded-full animate-spin"></div>
+                              <span className="text-xs text-orange-500" title="Processing metadata...">
+                                Processing
+                              </span>
+                            </div>
                           )}
                         </div>
                       </td>
