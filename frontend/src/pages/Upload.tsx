@@ -1,24 +1,46 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { apiService } from '../services/api'
 
 export default function Upload() {
-  const [file, setFile] = useState<File | null>(null)
-  const [expiry, setExpiry] = useState('')
-  const [status, setStatus] = useState('Active')
-  const [risk, setRisk] = useState('Low')
+  const navigate = useNavigate()
+  const [files, setFiles] = useState<File[]>([])
   const [progress, setProgress] = useState(0)
   const [error, setError] = useState('')
   const [done, setDone] = useState('')
   const [isDragOver, setIsDragOver] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [apiStatus, setApiStatus] = useState<'checking' | 'online' | 'offline'>('checking')
   const inputRef = useRef<HTMLInputElement>(null)
+
+  // Check API health on component mount
+  useEffect(() => {
+    const checkApiHealth = async () => {
+      try {
+        const response = await apiService.healthCheck()
+        setApiStatus(response.error ? 'offline' : 'online')
+      } catch {
+        setApiStatus('offline')
+      }
+    }
+    checkApiHealth()
+  }, [])
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault()
     setIsDragOver(false)
-    const f = e.dataTransfer.files?.[0]
-    if (f && (f.type === 'application/pdf' || f.name.endsWith('.txt') || f.name.endsWith('.docx'))) {
-      setFile(f)
+    
+    const fileList = Array.from(e.dataTransfer.files)
+    const validFiles = fileList.filter(f => 
+      f.type === 'application/pdf' || 
+      // f.name.endsWith('.txt') || 
+      f.name.endsWith('.docx')
+    )
+    
+    if (validFiles.length > 0) {
+      setFiles(prev => [...prev, ...validFiles])
     } else {
-      setError('Please upload a PDF, TXT, or DOCX file')
+      setError('Please upload PDF, TXT, or DOCX files')
     }
   }
 
@@ -32,220 +54,245 @@ export default function Upload() {
     setIsDragOver(false)
   }
 
+  const onFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const fileList = Array.from(e.target.files || [])
+    const validFiles = fileList.filter(f => 
+      f.type === 'application/pdf' || 
+      f.name.endsWith('.txt') || 
+      f.name.endsWith('.docx')
+    )
+    
+    if (validFiles.length > 0) {
+      setFiles(prev => [...prev, ...validFiles])
+    }
+  }
+
+  const removeFile = (index: number) => {
+    setFiles(prev => prev.filter((_, i) => i !== index))
+  }
+
   const onUpload = async () => {
-    if (!file) return
+    if (files.length === 0) return
 
-    setError(''); setDone(''); setProgress(0)
-
+    setError(''); setDone(''); setProgress(0); setUploading(true)
+    
     try {
-      // Simulate upload progress
-      const progressInterval = setInterval(() => {
-        setProgress(prev => {
-          if (prev >= 90) {
-            clearInterval(progressInterval)
-            return 90
-          }
-          return prev + 10
-        })
-      }, 200)
-
-      // Simulate upload delay
-      await new Promise(resolve => setTimeout(resolve, 2000))
-      clearInterval(progressInterval)
-      setProgress(100)
+      // Start progress indication
+      setProgress(10)
       
-      await new Promise(resolve => setTimeout(resolve, 500))
-      setDone('Contract uploaded successfully! Processing for analysis...')
+      // Upload files using API
+      const response = await apiService.uploadFiles(files)
+      
+      setProgress(60)
+      
+      if (response.error) {
+        throw new Error(response.error)
+      }
+      
+      setProgress(90)
+      
+      // Check response data
+      if (response.data) {
+        const { uploaded_files = [], failed_uploads = [] } = response.data
+        
+        if (failed_uploads.length > 0) {
+          const errorMessages = failed_uploads.map((fail: any) => 
+            `${fail.filename}: ${fail.error}`
+          ).join(', ')
+          throw new Error(`Some uploads failed: ${errorMessages}`)
+        }
+        
+        // Success
+        setProgress(100)
+        setDone(`${uploaded_files.length} contract${uploaded_files.length > 1 ? 's' : ''} uploaded successfully! Processing for analysis...`)
+      } else {
+        setProgress(100)
+        setDone(`${files.length} contract${files.length > 1 ? 's' : ''} uploaded successfully! Processing for analysis...`)
+      }
       
       // Reset form after success
       setTimeout(() => {
-        setFile(null)
+        setFiles([])
         setProgress(0)
         setDone('')
-        setExpiry('')
-        setStatus('Active')
-        setRisk('Low')
+        setUploading(false)
       }, 3000)
       
     } catch (err: any) {
-      setError('Upload failed. Please try again.')
+      console.error('Upload error:', err)
+      setError(err.message || 'Upload failed. Please try again.')
       setProgress(0)
+      setUploading(false)
     }
   }
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8 space-y-8">
+    <div className="max-w-4xl mx-auto p-6">
       {/* Header */}
-      <div className="text-center">
-        <h1 className="text-3xl font-bold text-gray-900">Upload Contract</h1>
-        <p className="text-gray-600 mt-2">Upload your contract documents for AI-powered analysis</p>
+      <div className="text-center mb-8">
+        <h1 className="text-3xl font-bold text-gray-900 mb-4">Upload Contracts</h1>
+        <p className="text-gray-600">Upload your contract documents for AI-powered analysis</p>
+        
+        {/* API Status Indicator */}
+        {/* <div className="mt-4 flex items-center justify-center">
+          <div className={`flex items-center space-x-2 px-3 py-1 rounded-full text-sm ${
+            apiStatus === 'online' ? 'bg-green-100 text-green-800' :
+            apiStatus === 'offline' ? 'bg-red-100 text-red-800' :
+            'bg-yellow-100 text-yellow-800'
+          }`}>
+            <div className={`w-2 h-2 rounded-full ${
+              apiStatus === 'online' ? 'bg-green-500' :
+              apiStatus === 'offline' ? 'bg-red-500' :
+              'bg-yellow-500'
+            }`}></div>
+            <span>
+              {apiStatus === 'online' ? 'Backend Connected' :
+               apiStatus === 'offline' ? 'Backend Offline' :
+               'Checking Connection...'}
+            </span>
+          </div>
+        </div> */}
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
-        {/* Upload Zone */}
-        <div
-          onDrop={onDrop}
-          onDragOver={onDragOver}
-          onDragLeave={onDragLeave}
-          className={`upload-zone ${isDragOver ? 'dragover' : ''}`}
-        >
-          <div className="space-y-4">
-            <div className="flex justify-center">
-              <div className="bg-blue-50 p-4 rounded-full">
-                <svg className="h-12 w-12 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                </svg>
-              </div>
-            </div>
-            
-            <div className="text-center">
-              <h3 className="text-lg font-medium text-gray-900">
-                {file ? 'File Selected' : 'Drag & drop your contract here'}
-              </h3>
-              <p className="text-gray-500 mt-1">
-                {file ? `Selected: ${file.name}` : 'Supports PDF, TXT, and DOCX files'}
-              </p>
-            </div>
+      {/* Upload Zone */}
+      <div
+        className={`border-2 border-dashed rounded-xl p-8 text-center mb-6 transition-colors ${
+          isDragOver 
+            ? 'border-blue-500 bg-blue-50' 
+            : files.length > 0 
+            ? 'border-green-500 bg-green-50' 
+            : 'border-gray-300 bg-gray-50'
+        }`}
+        onDrop={onDrop}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+      >
+        <div className="flex flex-col items-center">
+          <div className={`w-16 h-16 rounded-full flex items-center justify-center mb-4 ${
+            files.length > 0 ? 'bg-green-100' : 'bg-blue-100'
+          }`}>
+            <svg className={`w-8 h-8 ${files.length > 0 ? 'text-green-600' : 'text-blue-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+            </svg>
+          </div>
+          
+          <h3 className="text-xl font-semibold mb-2">
+            {files.length > 0 ? `${files.length} File${files.length > 1 ? 's' : ''} Selected` : 'Drag & drop your contracts here'}
+          </h3>
+          
+          <p className="text-gray-500 mb-4">
+            Supports PDF, TXT, and DOCX files • Multiple files allowed
+          </p>
 
-            {!file && (
-              <div className="text-center">
-                <button
-                  type="button"
-                  onClick={() => inputRef.current?.click()}
-                  className="btn-primary"
-                >
-                  Choose File
-                </button>
-              </div>
-            )}
+          <button
+            onClick={() => inputRef.current?.click()}
+            className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors font-medium"
+          >
+            Choose Files
+          </button>
+        </div>
 
-            {file && (
-              <div className="flex items-center justify-center space-x-4">
-                <div className="flex items-center text-sm text-green-600">
-                  <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  {file.name} ({Math.round(file.size / 1024)}KB)
+        <input
+          ref={inputRef}
+          type="file"
+          multiple
+          accept=".pdf,.txt,.docx"
+          onChange={onFileSelect}
+          className="hidden"
+        />
+      </div>
+
+      {/* Selected Files List */}
+      {files.length > 0 && (
+        <div className="mb-6">
+          <h3 className="text-lg font-semibold mb-3">Selected Files ({files.length})</h3>
+          <div className="space-y-2">
+            {files.map((file, index) => (
+              <div key={index} className="flex items-center justify-between p-3 bg-white border border-gray-200 rounded-lg">
+                <div className="flex items-center space-x-3">
+                  <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                    <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <div className="font-medium text-gray-900">{file.name}</div>
+                    <div className="text-sm text-gray-500">{Math.round(file.size / 1024)} KB</div>
+                  </div>
                 </div>
+                
                 <button
-                  onClick={() => setFile(null)}
-                  className="text-red-600 hover:text-red-800 text-sm font-medium"
+                  onClick={() => removeFile(index)}
+                  className="text-red-600 hover:text-red-800 text-sm font-medium px-3 py-1 rounded"
                 >
                   Remove
                 </button>
               </div>
-            )}
+            ))}
           </div>
-
-          <input
-            ref={inputRef}
-            type="file"
-            accept=".pdf,.txt,.docx"
-            onChange={(e) => setFile(e.target.files?.[0] || null)}
-            className="hidden"
-          />
         </div>
+      )}
 
-        {/* Contract Details Form */}
-        {file && (
-          <div className="mt-8 space-y-6">
-            <h3 className="text-lg font-medium text-gray-900 border-b border-gray-200 pb-2">
-              Contract Details
-            </h3>
-            
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div>
-                <label htmlFor="expiry" className="block text-sm font-medium text-gray-700 mb-2">
-                  Expiry Date (Optional)
-                </label>
-                <input
-                  id="expiry"
-                  type="date"
-                  value={expiry}
-                  onChange={(e) => setExpiry(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
+      {/* Upload Button */}
+      {files.length > 0 && (
+        <button
+          onClick={onUpload}
+          disabled={uploading || progress > 0 || apiStatus !== 'online'}
+          className="w-full bg-blue-600 text-white py-3 px-6 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          {uploading || progress > 0 ? 'Uploading...' : 
+           apiStatus !== 'online' ? 'Backend Unavailable' :
+           `Upload ${files.length} Contract${files.length > 1 ? 's' : ''}`}
+        </button>
+      )}
 
-              <div>
-                <label htmlFor="status" className="block text-sm font-medium text-gray-700 mb-2">
-                  Status
-                </label>
-                <select
-                  id="status"
-                  value={status}
-                  onChange={(e) => setStatus(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value="Active">Active</option>
-                  <option value="Renewal Due">Renewal Due</option>
-                  <option value="Expired">Expired</option>
-                </select>
-              </div>
+      {/* Progress Bar */}
+      {progress > 0 && (
+        <div className="mt-4">
+          <div className="flex justify-between text-sm text-gray-600 mb-2">
+            <span>Uploading...</span>
+            <span>{progress}%</span>
+          </div>
+          <div className="w-full bg-gray-200 rounded-full h-2">
+            <div 
+              className="bg-blue-600 h-2 rounded-full transition-all duration-300" 
+              style={{ width: `${progress}%` }}
+            ></div>
+          </div>
+        </div>
+      )}
 
-              <div>
-                <label htmlFor="risk" className="block text-sm font-medium text-gray-700 mb-2">
-                  Risk Level
-                </label>
-                <select
-                  id="risk"
-                  value={risk}
-                  onChange={(e) => setRisk(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value="Low">Low</option>
-                  <option value="Medium">Medium</option>
-                  <option value="High">High</option>
-                </select>
-              </div>
+      {/* Success Message */}
+      {done && (
+        <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              <svg className="w-5 h-5 text-green-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+              <span className="text-green-800">{done}</span>
             </div>
-
             <button
-              onClick={onUpload}
-              disabled={progress > 0}
-              className="w-full btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={() => navigate('/app/dashboard')}
+              className="ml-4 bg-green-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-green-700 transition-colors"
             >
-              {progress > 0 ? 'Uploading...' : 'Upload Contract'}
+              View Dashboard
             </button>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Progress Bar */}
-        {progress > 0 && (
-          <div className="mt-6">
-            <div className="flex justify-between text-sm text-gray-600 mb-2">
-              <span>Uploading...</span>
-              <span>{progress}%</span>
-            </div>
-            <div className="progress-bar">
-              <div
-                className="progress-fill"
-                style={{ width: `${progress}%` }}
-              />
-            </div>
-          </div>
-        )}
-
-        {/* Success Message */}
-        {done && (
-          <div className="mt-6 bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg flex items-center">
-            <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+      {/* Error Message */}
+      {error && (
+        <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+          <div className="flex items-center">
+            <svg className="w-5 h-5 text-red-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
-            {done}
+            <span className="text-red-800">{error}</span>
           </div>
-        )}
-
-        {/* Error Message */}
-        {error && (
-          <div className="mt-6 bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-lg flex items-center">
-            <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            {error}
-          </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   )
 }

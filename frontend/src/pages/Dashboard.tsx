@@ -1,110 +1,388 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { 
   TrendingUp, 
-  TrendingDown, 
   AlertTriangle, 
-  CheckCircle, 
   Clock, 
-  DollarSign,
-  FileText,
-  Users,
-  Calendar,
-  BarChart3,
-  PieChart,
-  Activity,
-  Zap,
-  Shield,
+  DollarSign, 
+  FileText, 
+  Search, 
+  Filter, 
+  Download, 
+  Eye, 
   Upload,
-  Eye,
-  Download,
-  Filter,
-  Search,
+  Activity,
+  Shield,
   Bell,
   Settings,
   Plus,
-  ArrowRight,
-  Target,
-  Briefcase,
-  Globe,
-  ArrowDown
+  Zap
 } from 'lucide-react';
+import { apiService, ContractFileWithMetadata } from '../services/api';
+import webSocketService from '../services/websocket';
 
 const Dashboard = () => {
-  const [activeContracts] = useState(247);
-  const [totalValue] = useState('$12.4M');
-  const [expiringContracts] = useState(23);
+  const navigate = useNavigate();
+  
+  // API Integration State
+  const [contractFiles, setContractFiles] = useState<ContractFileWithMetadata[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  
+  // Calculated metrics from real data
+  const [activeContracts, setActiveContracts] = useState(0);
+  const [totalValue, setTotalValue] = useState('$0');
+  const [expiringContracts, setExpiringContracts] = useState(0);
   const [riskScore] = useState(7.2);
+  
+  // UI State
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilters, setStatusFilters] = useState<string[]>([]);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage] = useState(10);
 
-  // Sample contract data
-  const contractData = [
-    { id: 1, name: "TeleCo Master Service Agreement", vendor: "TeleCo Ltd", value: "$2.4M", status: "Active", expiry: "2025-06-30", risk: "Low", type: "MSA" },
-    { id: 2, name: "CloudTech Infrastructure Contract", vendor: "CloudTech Inc", value: "$1.8M", status: "Active", expiry: "2025-12-15", risk: "Medium", type: "Service" },
-    { id: 3, name: "DataFlow Analytics License", vendor: "DataFlow Corp", value: "$850K", status: "Expiring", expiry: "2025-10-01", risk: "High", type: "License" },
-    { id: 4, name: "SecureNet Cybersecurity Services", vendor: "SecureNet Ltd", value: "$1.2M", status: "Active", expiry: "2026-03-20", risk: "Low", type: "Service" },
-    { id: 5, name: "OfficeSpace Lease Agreement", vendor: "PropertyCorp", value: "$3.1M", status: "Active", expiry: "2025-08-31", risk: "Medium", type: "Lease" },
-    { id: 6, name: "Marketing Services Contract", vendor: "AdTech Solutions", value: "$950K", status: "Active", expiry: "2025-11-15", risk: "Low", type: "Service" },
-    { id: 7, name: "IT Support Agreement", vendor: "TechSupport Pro", value: "$1.4M", status: "Active", expiry: "2026-01-10", risk: "Medium", type: "Support" },
-    { id: 8, name: "Legal Advisory Retainer", vendor: "LawFirm Associates", value: "$680K", status: "Expiring", expiry: "2025-09-30", risk: "High", type: "Legal" }
-  ];
-
-  // Recent activity data
-  const recentActivity = [
-    { id: 1, user: "John Smith", action: "uploaded", item: "Service Agreement", date: "2 hours ago", category: "Contract" },
-    { id: 2, user: "Sarah Wilson", action: "reviewed", item: "NDA Document", date: "4 hours ago", category: "Legal" },
-    { id: 3, user: "Mike Chen", action: "approved", item: "Vendor Contract", date: "6 hours ago", category: "Procurement" },
-    { id: 4, user: "Lisa Brown", action: "flagged", item: "High Risk Contract", date: "8 hours ago", category: "Risk" },
-    { id: 5, user: "David Lee", action: "renewed", item: "Software License", date: "1 day ago", category: "License" },
-    { id: 6, user: "Emma Davis", action: "exported", item: "Monthly Report", date: "1 day ago", category: "Report" }
-  ];
-
-  // Calendar opener component
-  const CalendarOpener = () => {
-    const handleOpen = () => {
-      const anchor = document.createElement('input');
-      anchor.type = 'date';
-      anchor.style.position = 'fixed';
-      anchor.style.opacity = '0';
-      document.body.appendChild(anchor);
-      anchor.showPicker?.();
-      setTimeout(() => anchor.remove(), 500);
+  // Load contract data on component mount
+  useEffect(() => {
+    loadContractData();
+    
+    // Set up WebSocket event listeners
+    const handleMetadataExtracted = (message: any) => {
+      console.log('Metadata extracted for file:', message.file_id);
+      // Refresh contract data to show updated metadata
+      loadContractData();
     };
 
-    return (
-      <button 
-        onClick={handleOpen}
-        className="mt-4 w-full px-3 py-2 rounded-lg border text-sm bg-white hover:bg-gray-50"
-      >
-        Open Calendar
-      </button>
-    );
+    const handleFileProcessingUpdate = (message: any) => {
+      console.log('File processing update:', message);
+      if (message.status === 'metadata_completed') {
+        // Refresh contract data when metadata processing is complete
+        loadContractData();
+      }
+    };
+
+    // Add event listeners
+    webSocketService.onMetadataExtracted(handleMetadataExtracted);
+    webSocketService.onFileProcessingUpdate(handleFileProcessingUpdate);
+
+    // Cleanup on unmount
+    return () => {
+      webSocketService.off('metadata_extracted', handleMetadataExtracted);
+      webSocketService.off('file_processing_update', handleFileProcessingUpdate);
+    };
+  }, []);
+
+  const loadContractData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // Load all contracts (increase limit to get all available)
+      const response = await apiService.getContractFiles(100, 0);
+      
+      if (response.error) {
+        setError(response.error);
+        return;
+      }
+      
+      if (response.data) {
+        setContractFiles(response.data);
+        
+        // Calculate metrics from metadata
+        const completedFiles = response.data.filter(file => 
+          file.metadata_processing_status === 'completed'
+        );
+        
+        setActiveContracts(completedFiles.length);
+        
+        // Calculate total value from Contract Value column (contract_value field)
+        let totalValueNum = 0;
+        completedFiles.forEach(file => {
+          const metadata = file.file_metadata;
+          if (metadata?.contract_value && metadata.contract_value !== 'N/A') {
+            // Remove currency symbols, commas, and non-numeric characters except decimal point and negative sign
+            let cleanValue = metadata.contract_value
+              .replace(/[$,€£¥₹]/g, '') // Remove common currency symbols
+              .replace(/[^0-9.-]/g, ''); // Remove any other non-numeric characters
+            
+            // Handle values with 'K', 'M', 'B' suffixes
+            const multiplier = cleanValue.includes('K') ? 1000 : 
+                             cleanValue.includes('M') ? 1000000 : 
+                             cleanValue.includes('B') ? 1000000000 : 1;
+            
+            cleanValue = cleanValue.replace(/[KMB]/gi, '');
+            const value = parseFloat(cleanValue) * multiplier;
+            
+            if (!isNaN(value) && value > 0) {
+              totalValueNum += value;
+            }
+          }
+        });
+        
+        // Format total value display
+        setTotalValue(totalValueNum > 0 ? 
+          totalValueNum >= 1000000000 ? `$${(totalValueNum / 1000000000).toFixed(1)}B` :
+          totalValueNum >= 1000000 ? `$${(totalValueNum / 1000000).toFixed(1)}M` :
+          totalValueNum >= 1000 ? `$${(totalValueNum / 1000).toFixed(1)}K` :
+          `$${totalValueNum.toFixed(0)}` : '$0');
+        
+        // Calculate expiring contracts (next 90 days)
+        const currentDate = new Date();
+        const ninetyDaysFromNow = new Date(currentDate.getTime() + (90 * 24 * 60 * 60 * 1000));
+        
+        const expiring = completedFiles.filter(file => {
+          const metadata = file.file_metadata;
+          if (metadata?.end_date) {
+            const endDate = new Date(metadata.end_date);
+            return endDate <= ninetyDaysFromNow && endDate > currentDate;
+          }
+          return false;
+        });
+        
+        setExpiringContracts(expiring.length);
+      }
+    } catch (err) {
+      setError('Failed to load contract data');
+      console.error('Error loading contracts:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Handle file download
+  const handleDownload = async (fileId: string) => {
+    try {
+      const response = await apiService.getFileViewUrl(fileId);
+      if (response.data?.view_url) {
+        // Open view URL in new tab
+        window.open(response.data.view_url, '_blank');
+      } else {
+        console.error('No view URL received');
+        alert('Failed to get view URL');
+      }
+    } catch (error) {
+      console.error('Error getting view URL:', error);
+      alert('Failed to view file');
+    }
+  };
+
+  // Handle file view
+  const handleView = async (fileId: string) => {
+    try {
+      const response = await apiService.getFileViewUrl(fileId);
+      if (response.data?.view_url) {
+        // Open view URL in new tab
+        window.open(response.data.view_url, '_blank');
+      } else {
+        console.error('No view URL received');
+        alert('Failed to get view URL');
+      }
+    } catch (error) {
+      console.error('Error getting view URL:', error);
+      alert('Failed to view file');
+    }
+  };
+
+  // Export contract data to CSV
+  const exportToCSV = () => {
+    try {
+      // Use filtered contracts for export
+      const dataToExport = filteredContracts;
+      
+      if (dataToExport.length === 0) {
+        alert('No data to export');
+        return;
+      }
+
+      // Helper function to format date strings
+      const formatDate = (dateString: string) => {
+        if (!dateString || dateString === 'N/A') return 'N/A';
+        
+        try {
+          // Try to parse the date and format it consistently
+          const date = new Date(dateString);
+          if (isNaN(date.getTime())) return dateString; // Return original if invalid
+          return date.toLocaleDateString(); // Format as MM/DD/YYYY or based on locale
+        } catch {
+          return dateString; // Return original if parsing fails
+        }
+      };
+
+      // Define CSV headers
+      const headers = [
+        'Contract Name',
+        'Type',
+        'Vendor',
+        'Contract Value',
+        'Currency',
+        'Status',
+        'Start Date',
+        'End Date',
+        'Duration',
+        'Scope of Services',
+        'Upload Date',
+        'Confidence Score'
+      ];
+
+      // Convert data to CSV rows
+      const csvRows = [
+        headers.join(','), // Header row
+        ...dataToExport.map(contract => [
+          `"${contract.name.replace(/"/g, '""')}"`, // Escape quotes in contract name
+          `"${contract.type}"`,
+          `"${contract.vendor.replace(/"/g, '""')}"`, // Escape quotes in vendor name
+          `"${contract.contractValue}"`,
+          `"${contract.currency}"`,
+          `"${contract.status}"`,
+          `"${formatDate(contract.startDate)}"`, // Format start date
+          `"${formatDate(contract.endDate)}"`, // Format end date
+          `"${contract.duration}"`,
+          `"${contract.scope.replace(/"/g, '""')}"`, // Escape quotes in scope
+          `"${contract.uploadDate}"`, // Upload date is already formatted
+          contract.confidenceScore ? `"${(contract.confidenceScore * 100).toFixed(1)}%"` : '"N/A"'
+        ].join(','))
+      ];
+
+      // Create CSV content
+      const csvContent = csvRows.join('\n');
+
+      // Create and download the file
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      
+      if (link.download !== undefined) {
+        const url = URL.createObjectURL(blob);
+        link.setAttribute('href', url);
+        link.setAttribute('download', `contracts_export_${new Date().toISOString().split('T')[0]}.csv`);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      }
+    } catch (error) {
+      console.error('Error exporting CSV:', error);
+      alert('Failed to export CSV');
+    }
+  };
+
+  // Transform API data to display format for the table
+  const contractData = contractFiles.map((file, index) => {
+    const metadata = file.file_metadata;
+    
+    return {
+      id: index + 1,
+      name: file.filename.replace('.pdf', ''),
+      type: metadata?.contract_type || 'N/A',
+      vendor: metadata?.vendor_name || 'N/A',
+      contractValue: metadata?.contract_value || 'N/A', // Main contract value field
+      contractValueLocal: metadata?.contract_value_local || 'N/A', // Separate local value
+      currency: metadata?.currency || 'N/A', // Separate currency
+      status: metadata?.contract_status || 'N/A',
+      fileId: file.id,
+      cloudinaryUrl: file.cloudinary_url,
+      uploadDate: new Date(file.upload_timestamp).toLocaleDateString(),
+      startDate: metadata?.start_date || 'N/A',
+      endDate: metadata?.end_date || 'N/A',
+      duration: metadata?.contract_duration || 'N/A',
+      scope: metadata?.scope_of_services || 'N/A',
+      confidenceScore: metadata?.confidence_score || null,
+      hasMetadata: !!metadata,
+      // Legacy fields for compatibility
+      localValue: metadata?.contract_value_local || 'N/A',
+      localCurrency: metadata?.currency || 'N/A',
+      usdValue: metadata?.contract_value || 'N/A',
+      tag: metadata?.contract_type || 'Contract'
+    };
+  });
+
+  // Filter contracts based on status and search
+  const filteredContracts = contractData.filter(contract => {
+    const matchesSearch = contract.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         contract.vendor.toLowerCase().includes(searchTerm.toLowerCase());
+    
+    // If no status filters are selected, show all contracts
+    if (statusFilters.length === 0) return matchesSearch;
+    
+    // Check if contract status matches any of the selected filters
+    return matchesSearch && statusFilters.some(filter => {
+      if (filter === 'Active') return contract.status === 'Active';
+      if (filter === 'Expiring Soon') return contract.status === 'Expiring' || contract.status === 'Expired';
+      if (filter === 'Expired') return contract.status === 'Expired';
+      if (filter === 'Draft') return contract.status === 'Draft';
+      return false;
+    });
+  });
+
+  // Calculate dynamic metrics based on filtered contracts
+  const filteredMetrics = React.useMemo(() => {
+    // Calculate total value from filtered contracts
+    let totalValueNum = 0;
+    filteredContracts.forEach(contract => {
+      if (contract.contractValue && contract.contractValue !== 'N/A') {
+        // Remove currency symbols, commas, and non-numeric characters except decimal point and negative sign
+        let cleanValue = contract.contractValue
+          .replace(/[$,€£¥₹]/g, '') // Remove common currency symbols
+          .replace(/[^0-9.-]/g, ''); // Remove any other non-numeric characters
+        
+        // Handle values with 'K', 'M', 'B' suffixes
+        const multiplier = cleanValue.includes('K') ? 1000 : 
+                         cleanValue.includes('M') ? 1000000 : 
+                         cleanValue.includes('B') ? 1000000000 : 1;
+        
+        cleanValue = cleanValue.replace(/[KMB]/gi, '');
+        const value = parseFloat(cleanValue) * multiplier;
+        
+        if (!isNaN(value) && value > 0) {
+          totalValueNum += value;
+        }
+      }
+    });
+    
+    // Format total value display
+    const formattedValue = totalValueNum > 0 ? 
+      totalValueNum >= 1000000000 ? `$${(totalValueNum / 1000000000).toFixed(1)}B` :
+      totalValueNum >= 1000000 ? `$${(totalValueNum / 1000000).toFixed(1)}M` :
+      totalValueNum >= 1000 ? `$${(totalValueNum / 1000).toFixed(1)}K` :
+      `$${totalValueNum.toFixed(0)}` : '$0';
+    
+    return {
+      totalValue: formattedValue,
+      contractCount: filteredContracts.length,
+      vendorCount: new Set(filteredContracts.map(c => c.vendor)).size
+    };
+  }, [filteredContracts]);
+
+  // Pagination calculations
+  const totalPages = Math.ceil(filteredContracts.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const currentContracts = filteredContracts.slice(startIndex, endIndex);
+
+  // Reset to first page when filters change
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [statusFilters, searchTerm]);
+
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+  };
+
+  const handlePreviousPage = () => {
+    if (currentPage > 1) {
+      setCurrentPage(currentPage - 1);
+    }
+  };
+
+  const handleNextPage = () => {
+    if (currentPage < totalPages) {
+      setCurrentPage(currentPage + 1);
+    }
   };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
-      {/* Header */}
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-50 shadow-sm">
-        <div className="w-full px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center space-x-4">
-              <div className="flex items-center space-x-2">
-                <div className="w-8 h-8 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center">
-                  <Zap className="w-5 h-5 text-white" />
-                </div>
-                <h1 className="text-xl font-bold text-gray-900">ReLexWise</h1>
-              </div>
-              <div className="text-sm text-gray-500">Contract Intelligence Dashboard</div>
-            </div>
-            <div className="flex items-center space-x-4">
-              <Bell className="w-5 h-5 text-gray-400 hover:text-gray-600 cursor-pointer" />
-              <Settings className="w-5 h-5 text-gray-400 hover:text-gray-600 cursor-pointer" />
-              <div className="w-8 h-8 bg-gray-200 rounded-full"></div>
-            </div>
-          </div>
-        </div>
-      </header>
-
+      
       <div className="w-full px-4 sm:px-6 lg:px-8 py-8">
-        
         {/* Welcome Section */}
         <div className="mb-8">
           <div className="flex items-center justify-between">
@@ -113,100 +391,169 @@ const Dashboard = () => {
               <p className="text-gray-600">It's the best time to manage your contracts with AI-powered insights</p>
             </div>
             <div className="flex space-x-3">
-              <button className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center space-x-2">
+              <button 
+                onClick={() => navigate('/app/upload')}
+                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center space-x-2"
+              >
                 <Upload className="w-4 h-4" />
                 <span>Upload Contracts</span>
               </button>
-              <button className="border border-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-50 flex items-center space-x-2">
-                <Plus className="w-4 h-4" />
-                <span>New Contract</span>
-              </button>
             </div>
           </div>
+        </div>
+
+        {/* Status Tabs */}
+        <div className="flex flex-wrap items-center gap-4 mb-8">
+          {(['Active','Expiring Soon','Expired','Draft'] as const).map(tab => (
+            <button
+              key={tab}
+              onClick={() => {
+                setStatusFilters(prev => 
+                  prev.includes(tab) 
+                    ? prev.filter(f => f !== tab)  // Remove if already selected
+                    : [...prev, tab]              // Add if not selected
+                );
+              }}
+              className={`${statusFilters.includes(tab) ? 'bg-blue-600/90 text-white' : 'bg-blue-100 text-blue-800'} px-6 py-2.5 rounded-xl shadow-sm hover:opacity-95 transition`}
+            >
+              {tab}
+            </button>
+          ))}
+          {statusFilters.length > 0 && (
+            <button
+              onClick={() => setStatusFilters([])}
+              className="text-sm text-gray-600 hover:text-gray-800 underline"
+            >
+              Clear all filters
+            </button>
+          )}
         </div>
 
         {/* Key Metrics */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-            <div className="flex items-center justify-between mb-4">
-              <div className="p-2 bg-blue-100 rounded-lg">
-                <FileText className="w-6 h-6 text-blue-600" />
+        <div className="mb-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+          <div className="bg-green-50 border border-green-200 rounded-xl p-5">
+            <div className="flex items-center space-x-3 mb-2">
+              <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center">
+                <DollarSign className="w-5 h-5 text-green-700" />
               </div>
-              <TrendingUp className="w-5 h-5 text-green-500" />
+              <div className="text-sm font-medium text-green-900">Total Contract Value</div>
             </div>
-            <h3 className="text-2xl font-bold text-gray-900 mb-1">{activeContracts}</h3>
-            <p className="text-gray-600 text-sm">Active Contracts</p>
-            <div className="mt-2 text-xs text-green-600">+12% from last month</div>
+            <div className="text-3xl font-bold text-green-900">{loading ? '...' : filteredMetrics.totalValue}</div>
           </div>
-
-          <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-            <div className="flex items-center justify-between mb-4">
-              <div className="p-2 bg-green-100 rounded-lg">
-                <DollarSign className="w-6 h-6 text-green-600" />
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-5">
+            <div className="flex items-center space-x-3 mb-2">
+              <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center">
+                <FileText className="w-5 h-5 text-blue-700" />
               </div>
-              <TrendingUp className="w-5 h-5 text-green-500" />
+              <div className="text-sm font-medium text-blue-900">Number of Contracts</div>
             </div>
-            <h3 className="text-2xl font-bold text-gray-900 mb-1">{totalValue}</h3>
-            <p className="text-gray-600 text-sm">Total Contract Value</p>
-            <div className="mt-2 text-xs text-green-600">+8% portfolio growth</div>
+            <div className="text-3xl font-bold text-blue-900">{loading ? '...' : filteredMetrics.contractCount}</div>
           </div>
-
-          <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-            <div className="flex items-center justify-between mb-4">
-              <div className="p-2 bg-orange-100 rounded-lg">
-                <Clock className="w-6 h-6 text-orange-600" />
+          <div className="bg-rose-50 border border-rose-200 rounded-xl p-5">
+            <div className="flex items-center space-x-3 mb-2">
+              <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center">
+                <FileText className="w-5 h-5 text-rose-700" />
               </div>
-              <AlertTriangle className="w-5 h-5 text-orange-500" />
+              <div className="text-sm font-medium text-rose-900">Number of Vendors</div>
             </div>
-            <h3 className="text-2xl font-bold text-gray-900 mb-1">{expiringContracts}</h3>
-            <p className="text-gray-600 text-sm">Expiring Soon</p>
-            <div className="mt-2 text-xs text-orange-600">Next 90 days</div>
-          </div>
-
-          <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-            <div className="flex items-center justify-between mb-4">
-              <div className="p-2 bg-red-100 rounded-lg">
-                <Shield className="w-6 h-6 text-red-600" />
-              </div>
-              <div className="text-sm font-medium text-red-600">High Risk</div>
-            </div>
-            <h3 className="text-2xl font-bold text-gray-900 mb-1">{riskScore}/10</h3>
-            <p className="text-gray-600 text-sm">Average Risk Score</p>
-            <div className="mt-2 text-xs text-red-600">4 contracts need review</div>
+            <div className="text-3xl font-bold text-rose-900">{loading ? '...' : filteredMetrics.vendorCount}</div>
           </div>
         </div>
 
-        {/* Main Content Grid - Active Contracts moved to left side */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
-          
-          {/* Active Contracts Table - Moved here */}
-          <div className="lg:col-span-2 bg-white border border-gray-200 rounded-xl overflow-hidden">
-            <div className="p-6 border-b border-gray-200">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900">Active Contracts</h3>
-                  <p className="text-sm text-gray-600 mt-1">Use bulk actions to renew, export, or tag contracts faster</p>
-                </div>
-                <div className="flex items-center space-x-3">
-                  <div className="relative">
-                    <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 transform -translate-y-1/2" />
-                    <input 
-                      type="text" 
-                      placeholder="Search contracts..." 
-                      className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    />
-                  </div>
-                  <button className="p-2 border border-gray-300 rounded-lg hover:bg-gray-50">
-                    <Filter className="w-4 h-4 text-gray-600" />
-                  </button>
-                  <button className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm">
-                    Export CSV
-                  </button>
-                </div>
+        {/* Contracts Table Section */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col">
+          <div className="p-6 border-b border-gray-200">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Contract Details</h3>
+                <p className="text-sm text-gray-500">
+                  Complete contract information with metadata 
+                  {filteredContracts.length !== contractData.length && (
+                    <span className="text-blue-600 font-medium">
+                      • {filteredContracts.length} of {contractData.length} contracts shown
+                    </span>
+                  )}
+                </p>
+              </div>
+              <div className="flex items-center space-x-3">
+                <button 
+                  onClick={loadContractData}
+                  disabled={loading}
+                  className="p-2 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                  title="Refresh contracts"
+                >
+                  <Activity className={`w-4 h-4 text-gray-600 ${loading ? 'animate-spin' : ''}`} />
+                </button>
+                <button className="p-2 border border-gray-300 rounded-lg hover:bg-gray-50">
+                  <Filter className="w-4 h-4 text-gray-600" />
+                </button>
+                <button 
+                  className={`px-4 py-2 rounded-lg text-sm transition-colors ${
+                    loading || filteredContracts.length === 0 
+                      ? 'bg-gray-400 text-gray-200 cursor-not-allowed' 
+                      : 'bg-blue-600 text-white hover:bg-blue-700'
+                  }`}
+                  onClick={exportToCSV}
+                  disabled={loading || filteredContracts.length === 0}
+                  title={filteredContracts.length === 0 ? 'No data to export' : 'Export filtered contracts to CSV'}
+                >
+                  Export CSV
+                </button>
               </div>
             </div>
 
-            <div className="overflow-x-auto">
+            {/* Search Bar */}
+            <div className="mb-6">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                <input
+                  type="text"
+                  placeholder="Search contracts by name or vendor..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            {loading ? (
+              <div className="flex justify-center items-center py-12">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                <span className="ml-3 text-gray-600">Loading contracts...</span>
+              </div>
+            ) : error ? (
+              <div className="flex flex-col justify-center items-center py-12">
+                <AlertTriangle className="w-12 h-12 text-red-500 mb-4" />
+                <p className="text-red-600 mb-4">{error}</p>
+                <button 
+                  onClick={loadContractData}
+                  className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+                >
+                  Retry
+                </button>
+              </div>
+            ) : filteredContracts.length === 0 ? (
+              <div className="flex flex-col justify-center items-center py-12">
+                <FileText className="w-12 h-12 text-gray-400 mb-4" />
+                <p className="text-gray-500">No contracts found</p>
+                <p className="text-sm text-gray-400 mt-2">
+                  {contractData.length === 0 ? 'Upload some contracts to get started' : 'Try adjusting your search or filter criteria'}
+                </p>
+                {statusFilters.length > 0 || searchTerm && (
+                  <button
+                    onClick={() => {
+                      setStatusFilters([]);
+                      setSearchTerm('');
+                    }}
+                    className="mt-3 text-blue-600 hover:text-blue-800 text-sm underline"
+                  >
+                    Clear all filters
+                  </button>
+                )}
+              </div>
+            ) : (
               <table className="w-full">
                 <thead className="bg-gray-50">
                   <tr>
@@ -214,264 +561,171 @@ const Dashboard = () => {
                       <input type="checkbox" className="rounded border-gray-300" />
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contract</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Parties</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Value</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vendor</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contract Value</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Local Value</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Currency</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Expiry</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Risk</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Start Date</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">End Date</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Scope</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {contractData.slice(0, 6).map((contract, index) => (
+                  {currentContracts.map((contract, index) => (
                     <tr key={contract.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap">
                         <input type="checkbox" className="rounded border-gray-300" />
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div>
-                          <div className="text-sm font-medium text-gray-900">{contract.name}</div>
-                          <div className="text-sm text-gray-500">{contract.type}</div>
+                          <button 
+                            onClick={() => navigate(`/app/contracts/${contract.fileId}`)}
+                            className="text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline cursor-pointer text-left" 
+                            title={`View details for ${contract.name}`}
+                          >
+                            {contract.name.length > 30 ? `${contract.name.substring(0, 30)}...` : contract.name}
+                          </button>
+                          <div className="text-sm text-gray-500">
+                            {contract.hasMetadata ? `ID: ${contract.fileId.substring(0, 8)}` : 'Processing...'}
+                          </div>
                         </div>
                       </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{contract.type}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{contract.vendor}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{contract.value}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{contract.contractValue}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{contract.contractValueLocal}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{contract.currency}</td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
                           contract.status === 'Active' ? 'bg-green-100 text-green-800' :
-                          contract.status === 'Expiring' ? 'bg-orange-100 text-orange-800' :
+                          contract.status === 'Draft' ? 'bg-yellow-100 text-yellow-800' :
+                          contract.status === 'Expired' ? 'bg-red-100 text-red-800' :
                           'bg-gray-100 text-gray-800'
                         }`}>
                           {contract.status}
                         </span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{contract.expiry}</td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                          contract.risk === 'Low' ? 'bg-green-100 text-green-800' :
-                          contract.risk === 'Medium' ? 'bg-yellow-100 text-yellow-800' :
-                          'bg-red-100 text-red-800'
-                        }`}>
-                          {contract.risk}
-                        </span>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{contract.startDate}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{contract.endDate}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900" title={contract.scope}>
+                        {contract.scope.length > 20 ? `${contract.scope.substring(0, 20)}...` : contract.scope}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         <div className="flex items-center space-x-2">
-                          <button className="text-blue-600 hover:text-blue-900">
-                            <Eye className="w-4 h-4" />
-                          </button>
-                          <button className="text-gray-600 hover:text-gray-900">
+                          <button 
+                            className="text-blue-600 hover:text-blue-900"
+                            title={`View PDF${contract.confidenceScore ? ` (Confidence: ${(contract.confidenceScore * 100).toFixed(1)}%)` : ''}`}
+                            onClick={() => handleView(contract.fileId)}
+                          >
                             <Download className="w-4 h-4" />
                           </button>
+                          {/* <button 
+                            className="text-gray-600 hover:text-gray-900"
+                            title="Download PDF"
+                            onClick={() => handleDownload(contract.fileId)}
+                          >
+                            <Download className="w-4 h-4" />
+                          </button> */}
+                          {!contract.hasMetadata && (
+                            <div className="flex items-center space-x-1">
+                              <div className="w-3 h-3 border-2 border-orange-500 border-t-transparent rounded-full animate-spin"></div>
+                              <span className="text-xs text-orange-500" title="Processing metadata...">
+                                Processing
+                              </span>
+                            </div>
+                          )}
                         </div>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-            </div>
+            )}
+          </div>
 
-            <div className="px-6 py-4 border-t border-gray-200 bg-gray-50">
-              <div className="flex items-center justify-between">
-                <div className="text-sm text-gray-700">
-                  Showing <span className="font-medium">1</span> to <span className="font-medium">6</span> of{' '}
-                  <span className="font-medium">247</span> contracts
+          <div className="px-6 py-4 border-t border-gray-200 bg-gray-50">
+            <div className="flex items-center justify-between">
+              <div className="text-sm text-gray-700">
+                Showing <span className="font-medium">{startIndex + 1}</span> to <span className="font-medium">{Math.min(endIndex, filteredContracts.length)}</span> of{' '}
+                <span className="font-medium">{filteredContracts.length}</span> contracts
+              </div>
+              <div className="flex items-center space-x-2">
+                <button 
+                  onClick={handlePreviousPage}
+                  disabled={currentPage === 1}
+                  className="px-3 py-1 text-sm text-gray-600 border border-gray-300 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Previous
+                </button>
+                
+                {/* Page Numbers */}
+                <div className="flex items-center space-x-1">
+                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                    const pageNumber = i + 1;
+                    if (totalPages <= 5) {
+                      return (
+                        <button
+                          key={pageNumber}
+                          onClick={() => handlePageChange(pageNumber)}
+                          className={`px-3 py-1 text-sm rounded ${
+                            currentPage === pageNumber
+                              ? 'bg-blue-600 text-white'
+                              : 'text-gray-600 border border-gray-300 hover:bg-gray-100'
+                          }`}
+                        >
+                          {pageNumber}
+                        </button>
+                      );
+                    } else {
+                      // Handle pagination with ellipsis for many pages
+                      let pageToShow = pageNumber;
+                      if (currentPage > 3) {
+                        pageToShow = currentPage - 2 + i;
+                      }
+                      if (pageToShow > totalPages) return null;
+                      
+                      return (
+                        <button
+                          key={pageToShow}
+                          onClick={() => handlePageChange(pageToShow)}
+                          className={`px-3 py-1 text-sm rounded ${
+                            currentPage === pageToShow
+                              ? 'bg-blue-600 text-white'
+                              : 'text-gray-600 border border-gray-300 hover:bg-gray-100'
+                          }`}
+                        >
+                          {pageToShow}
+                        </button>
+                      );
+                    }
+                  })}
+                  {totalPages > 5 && currentPage < totalPages - 2 && (
+                    <>
+                      <span className="text-gray-500">...</span>
+                      <button
+                        onClick={() => handlePageChange(totalPages)}
+                        className="px-3 py-1 text-sm text-gray-600 border border-gray-300 rounded hover:bg-gray-100"
+                      >
+                        {totalPages}
+                      </button>
+                    </>
+                  )}
                 </div>
-                <div className="flex items-center space-x-2">
-                  <button className="px-3 py-1 text-sm text-gray-600 border border-gray-300 rounded hover:bg-gray-100">
-                    Previous
-                  </button>
-                  <button className="px-3 py-1 text-sm bg-blue-600 text-white rounded">1</button>
-                  <button className="px-3 py-1 text-sm text-gray-600 border border-gray-300 rounded hover:bg-gray-100">
-                    2
-                  </button>
-                  <button className="px-3 py-1 text-sm text-gray-600 border border-gray-300 rounded hover:bg-gray-100">
-                    Next
-                  </button>
-                </div>
+                
+                <button 
+                  onClick={handleNextPage}
+                  disabled={currentPage === totalPages || totalPages === 0}
+                  className="px-3 py-1 text-sm text-gray-600 border border-gray-300 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Next
+                </button>
               </div>
             </div>
           </div>
-
-          {/* Recent Activity - Keep on right side */}
-          <div className="bg-white border border-gray-200 rounded-xl p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900">Recent Activity</h3>
-              <button className="text-xs text-blue-600 hover:text-blue-700">View all</button>
-            </div>
-            
-            <div className="space-y-3">
-              {recentActivity.slice(0, 6).map((activity, idx) => (
-                <div key={idx} className="flex items-center justify-between py-2">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-8 h-8 rounded-full bg-violet-100 flex items-center justify-center text-violet-700 text-xs font-semibold">
-                      {activity.user.split(' ').map(n => n[0]).join('')}
-                    </div>
-                    <div className="truncate">
-                      <div className="text-sm text-gray-900 truncate">
-                        <span className="font-medium">{activity.user}</span> {activity.action.toLowerCase()} <span className="font-medium">{activity.item}</span>
-                      </div>
-                      <div className="text-xs text-gray-500">{activity.date} • {activity.category}</div>
-                    </div>
-                  </div>
-                  <span className="text-xs text-gray-500">{Math.floor(2 + idx)}m ago</span>
-                </div>
-              ))}
-            </div>
-          </div>
         </div>
-
-        {/* Upcoming Key Dates - Single row */}
-        <div className="grid grid-cols-1 lg:grid-cols-1 gap-8 mb-8">
-          <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900">Upcoming Key Dates</h3>
-              <span className="text-xs text-gray-500">Next 30 days</span>
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              {contractData.filter(d => d.status === 'Expiring' || d.status === 'Active').slice(0, 4).map(d => (
-                <div key={d.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                  <div className="flex items-center gap-3">
-                    <div className="w-2 h-2 rounded-full bg-amber-500"></div>
-                    <div>
-                      <div className="font-medium text-gray-900 text-sm truncate max-w-[120px]">{d.name.split(' ')[0]} {d.name.split(' ')[1]}</div>
-                      <div className="text-xs text-gray-500">{d.type}</div>
-                    </div>
-                  </div>
-                  <span className="text-xs text-gray-600">{d.expiry ? new Date(d.expiry).toLocaleDateString() : 'Soon'}</span>
-                </div>
-              ))}
-            </div>
-            
-            <CalendarOpener />
-          </div>
-        </div>
-
-        {/* See ReLexWise in Action - Flowchart Style */}
-        <div className="bg-white border border-gray-200 rounded-xl p-8 mb-8">
-          <div className="text-center mb-8">
-            <h2 className="text-2xl font-bold text-gray-900 mb-3">See ReLexWise in Action</h2>
-            <p className="text-gray-600 max-w-2xl mx-auto">
-              Experience the power of AI-driven contract intelligence with automated extraction, 
-              risk assessment, and compliance monitoring
-            </p>
-          </div>
-
-          {/* Flowchart Layout */}
-          <div className="relative max-w-5xl mx-auto">
-            {/* Top Row */}
-            <div className="flex justify-center items-start mb-12">
-              <div className="flex items-center space-x-8">
-                {/* Step 1 */}
-                <div className="flex flex-col items-center">
-                  <div className="relative">
-                  <div className="w-80 h-40 bg-gradient-to-br from-orange-50 to-orange-100 rounded-xl border-2 border-orange-200 p-6 flex flex-col">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="w-8 h-8 bg-orange-600 rounded-full flex items-center justify-center text-white font-bold text-sm">01</div>
-                        <Upload className="w-5 h-5 text-orange-600" />
-                      </div>
-                      <h4 className="font-semibold text-gray-900 text-base mb-2">Smart Extraction</h4>
-                      <p className="text-sm text-gray-600">OCR and NLP automatically extract vendor details, dates, values, and key terms from uploaded contracts</p>
-                    </div>
-                  </div>
-                  <div className="w-3 h-3 bg-orange-500 rounded-full mt-2"></div>
-                </div>
-
-                {/* Step 3 */}
-                <div className="flex flex-col items-center">
-                  <div className="relative">
-                  <div className="w-80 h-40 bg-gradient-to-br from-teal-50 to-teal-100 rounded-xl border-2 border-teal-200 p-6 flex flex-col">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="w-8 h-8 bg-teal-600 rounded-full flex items-center justify-center text-white font-bold text-sm">03</div>
-                        <Globe className="w-5 h-5 text-teal-600" />
-                      </div>
-                      <h4 className="font-semibold text-gray-900 text-base mb-2">ESG Compliance</h4>
-                      <p className="text-sm text-gray-600">Detect sustainability and compliance clauses mapped to CSRD, SEC, and GRI frameworks</p>
-                    </div>
-                  </div>
-                  <div className="w-3 h-3 bg-teal-500 rounded-full mt-2"></div>
-                </div>
-
-                {/* Step 5 */}
-                <div className="flex flex-col items-center">
-                  <div className="relative">
-                  <div className="w-80 h-40 bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl border-2 border-blue-200 p-6 flex flex-col">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-sm">05</div>
-                        <Activity className="w-5 h-5 text-blue-600" />
-                      </div>
-                      <h4 className="font-semibold text-gray-900 text-base mb-2">API Integration</h4>
-                      <p className="text-sm text-gray-600">Seamless integration with existing procurement, ERP, and CLM systems via API-first architecture</p>
-                    </div>
-                  </div>
-                  <div className="w-3 h-3 bg-blue-500 rounded-full mt-2"></div>
-                </div>
-              </div>
-            </div>
-
-            {/* Lines removed as requested */}
-
-            {/* Bottom Row */}
-            <div className="flex justify-center items-start">
-              <div className="flex items-center space-x-32">
-                {/* Step 2 */}
-                <div className="flex flex-col items-center">
-                  <div className="w-3 h-3 bg-red-500 rounded-full mb-2"></div>
-                  <div className="relative">
-                    <div className="w-80 h-40 bg-gradient-to-br from-red-50 to-red-100 rounded-xl border-2 border-red-200 p-6 flex flex-col">
-                      <div className="flex items-center justify-between mb-3">
-                        <div className="w-8 h-8 bg-red-600 rounded-full flex items-center justify-center text-white font-bold text-sm">02</div>
-                        <Shield className="w-6 h-6 text-red-600" />
-                      </div>
-                      <h4 className="font-semibold text-gray-900 text-base mb-2">Risk Assessment</h4>
-                      <p className="text-sm text-gray-600">Compare contracts to legal playbooks and industry benchmarks to highlight risky deviations</p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Step 4 */}
-                <div className="flex flex-col items-center">
-                  <div className="w-3 h-3 bg-purple-500 rounded-full mb-2"></div>
-                  <div className="relative">
-                    <div className="w-80 h-40 bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl border-2 border-purple-200 p-6 flex flex-col">
-                      <div className="flex items-center justify-between mb-3">
-                        <div className="w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center text-white font-bold text-sm">04</div>
-                        <BarChart3 className="w-6 h-6 text-purple-600" />
-                      </div>
-                      <h4 className="font-semibold text-gray-900 text-base mb-2">Invoice Validation</h4>
-                      <p className="text-sm text-gray-600">Match invoices to contract pricing and automatically detect billing discrepancies</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Bottom line removed */}
-          </div>
-
-          {/* CTA Section */}
-          <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl p-8 text-center mt-12">
-            <h3 className="text-2xl font-bold text-white mb-3">Start Your AI-Powered Contract Journey</h3>
-            <p className="text-blue-100 mb-6 max-w-2xl mx-auto">
-              Join leading enterprises who trust ReLexWise to transform their contract management with measurable ROI
-            </p>
-            <div className="flex justify-center space-x-4">
-              <button className="bg-white text-blue-600 px-6 py-3 rounded-lg font-semibold hover:bg-gray-50 flex items-center space-x-2">
-                <Upload className="w-4 h-4" />
-                <span>Start Free Trial</span>
-              </button>
-              <button className="border border-white text-white px-6 py-3 rounded-lg font-semibold hover:bg-white/10 flex items-center space-x-2">
-                <Calendar className="w-4 h-4" />
-                <span>Book 30-Day Pilot</span>
-              </button>
-            </div>
-            <div className="mt-4 text-sm text-blue-100">
-              Process 100 contracts → Deliver 3 ROI findings → Refundable upon conversion
-            </div>
-          </div>
-        </div>
-
         {/* Footer */}
         <footer className="mt-12 text-center text-sm text-gray-500">
           <p>© 2025 ReLexWise. Transforming contracts with AI-powered intelligence.</p>

@@ -34,17 +34,28 @@ class FileMetadata(Base):
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     file_id = Column(String, ForeignKey("files.id"), nullable=False)
     
-    # Contract details
+    # Contract details - Updated schema to match new extraction format
+    contract_name = Column(String, nullable=True)  # New field
     start_date = Column(String, nullable=True)
     end_date = Column(String, nullable=True)
     vendor_name = Column(String, nullable=True)
-    contract_value = Column(String, nullable=True)
+    contract_duration = Column(String, nullable=True)  # Contract duration in years
+    contract_value_local = Column(String, nullable=True)  # Contract value in local currency (number only)
+    currency = Column(String, nullable=True)  # Currency code (USD, INR, EUR, etc.) - maps to Local_Currency
+    contract_value_usd = Column(String, nullable=True)  # Contract value converted to USD
+    contract_status = Column(String, nullable=True)  # Active, Draft, Expired
     
     # Contract type - MSA, SOW, Amendment, Agreement, Order Form, Change Request, Other
     contract_type = Column(String, nullable=True)
     
-    # Scope of services - Managed Services, Time & Material, Hardware, Software, Maintenance
-    scope_of_services = Column(String, nullable=True)
+    # Scope of services - Updated to match new controlled vocabulary
+    scope_of_services = Column(String, nullable=True)  # Maps to Scope_of_Work
+    
+    # New field for contract tag
+    contract_tag = Column(String, nullable=True)  # Maps to Contract Tag
+    
+    # Legacy field for backward compatibility (keeping the old contract_value field)
+    contract_value = Column(String, nullable=True)
     
     # Processing info
     extraction_timestamp = Column(DateTime, default=datetime.utcnow)

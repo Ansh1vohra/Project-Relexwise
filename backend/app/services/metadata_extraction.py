@@ -13,7 +13,7 @@ genai.configure(api_key=settings.google_api_key)
 
 class MetadataExtractionService:
     def __init__(self):
-        self.model = genai.GenerativeModel('gemini-2.0-flash-exp')  # Free experimental model
+        self.model = genai.GenerativeModel('gemini-2.5-flash') 
         self.extraction_prompt = self._build_extraction_prompt()
     
     def _build_extraction_prompt(self) -> str:
@@ -21,48 +21,95 @@ class MetadataExtractionService:
         Build the prompt for metadata extraction
         """
         return """
-You are an expert contract analyst. From the given contract text, extract the following specific commercial and clause-related details with high precision:
+You are an expert Contract Manager and Legal Analyst. You carefully read IT service contracts and extract only the precise, objective details requested. Do not add assumptions. If information is missing or ambiguous, return "NA".
 
-REQUIRED FIELDS:
-1. Start Date: The contract start/effective date (format: YYYY-MM-DD if possible, otherwise as written)
-2. End Date: The contract end/expiry/termination date (format: YYYY-MM-DD if possible, otherwise as written)  
-3. Vendor Name: The company/vendor providing services or goods
-4. Contract Value: The total monetary value, amount, or price mentioned in the contract
+From the following contract text, extract the following details in structured format.
+Each field must return a precise value or "NA" if not available.
+Do not include explanations, only structured output.
 
-CONTRACT TYPE (select EXACTLY one):
-- MSA (Master Service Agreement)
-- SOW (Statement of Work)
-- Amendment
-- Agreement
-- Order Form
-- Change Request
-- Other (if none of the above match)
+**CORE CONTRACT FIELDS:**
 
-SCOPE OF SERVICES (select EXACTLY one):
-- Managed Services
-- Time & Material
-- Hardware
-- Software
-- Maintenance
+1. **Contract Name/Title** - Extract the formal title or name of the contract as mentioned in the document header or title section.
 
-INSTRUCTIONS:
-- If any field cannot be found or determined, mark it as "NA"
-- Be precise and extract exact values as they appear in the contract
-- For dates, try to standardize to YYYY-MM-DD format when possible
-- For contract value, include currency if mentioned
-- Choose the most appropriate category from the provided options
+2. **VendorName** - Legal name of the counterparty/vendor organization.
 
-Respond ONLY in JSON format with these exact keys:
+3. **StartDate** - Effective date or commencement date (format: YYYY-MM-DD).
+
+4. **EndDate** - Expiry date or contract end date (format: YYYY-MM-DD). If end date is not provided and contract duration is available, auto-calculate: End Date = Start Date + Contract Duration.
+
+5. **Contract Duration** - Contract Term/Active Term. If not explicitly stated, auto-calculate using Start Date and End Date. Format as years with one decimal point (e.g., "2.5 years").
+
+6. **ContractValue (Local)** - Total contract value (numeric only) in the given currency.
+
+7. **Currency** - Currency of the contract value (USD, INR, EUR, etc.).
+
+8. **Contract Value (USD)** - Convert the Contract Value to US Dollars using standard exchange rates.
+
+9. **ContractStatus** - Classify as one of: "Active", "Draft", "Expired"
+   - Rule: If StartDate ≤ today ≤ EndDate → Active
+   - If EndDate < today → Expired  
+   - If unsigned/no signatures/marked draft → Draft
+
+10. **ContractType** - Classify as one of: "MSA", "SOW", "Amendment", "Agreement", "Order Form", "Change Request", "Other"
+
+11. **ScopeOfServices** - Classify as one of: "Managed Services", "Time & Material", "Hardware", "Software", "Maintenance", "Other"
+
+12. **Contract Tag** - Classify contract expiry status as one of:
+   - "Expiry < 30 days" (if contract expires within 30 days from today)
+   - "Expiry 30 to 90 days" (if contract expires between 30-90 days from today)
+   - "Expiry 90 days to 1 year" (if contract expires between 90 days to 1 year from today)
+   - "Expiry > 1 year" (if contract expires more than 1 year from today)
+   - "Expired" (if contract has already expired)
+   - "No expiry date" (if no end date is specified)
+
+**COMMERCIAL TERMS EXTRACTION:**
+
+Based on the ScopeOfServices classification, extract relevant commercial terms:
+
+**A. Managed Services:**
+- TerminationForConvenience: Notice period for termination without cause (e.g., "90 days")
+- LiabilityCap: Monetary or time-based liability cap (e.g., "12 months of fees")
+- PaymentTerms: Invoice settlement days (e.g., "Net 45")
+
+**B. Time & Material:**
+- COLA: Annual price adjustment tied to CPI/Inflation (e.g., "5% or CPI annually")
+- FXExposure: Currency risk allocation (e.g., "Prices fixed in USD; FX borne by Customer")
+- VolumeDiscount: Volume discounts based on spend (e.g., "5% at 10M+")
+
+**C. Hardware:**
+- WarrantyPeriod: Hardware warranty length (e.g., "12 months")
+- DeliveryRiskAllocation: Risk allocation during shipping (e.g., "Risk passes on delivery")
+- AcceptanceCriteria: Hardware acceptance timeline (e.g., "30 days testing")
+
+**D. Software:**
+- AutoRenewal: Renewal mechanics (e.g., "Auto-renews annually; 60 days notice")
+- COLA: Annual price uplift percentage (e.g., "7% annual uplift")
+- SupportWarranty: Included support duration (e.g., "6 months included support")
+
+**E. Maintenance & Support:**
+- EscalationPercentage: Annual fee increases (e.g., "5% per year")
+- AutoRenewal: Renewal mechanics (e.g., "Auto-renews yearly; 30 days notice")
+- SLAPenalties: Service level penalties (e.g., "5% credit if uptime <99.9%")
+
+**OUTPUT FORMAT:**
+Return the response in the following JSON format with only the main fields for database storage:
+
 {
-  "start_date": "extracted start date or NA",
-  "end_date": "extracted end date or NA", 
-  "vendor_name": "extracted vendor name or NA",
-  "contract_value": "extracted contract value or NA",
-  "contract_type": "one of the specified contract types",
-  "scope_of_services": "one of the specified scope types"
+    "contract_name": "extracted title/name or NA",
+    "vendor_name": "extracted value or NA",
+    "start_date": "YYYY-MM-DD or NA",
+    "end_date": "YYYY-MM-DD or NA", 
+    "contract_duration": "X.X years or NA",
+    "contract_value_local": "numeric value or NA",
+    "currency": "currency code or NA",
+    "contract_value_usd": "USD equivalent or NA",
+    "contract_status": "Active/Draft/Expired or NA",
+    "contract_type": "MSA/SOW/Amendment/Agreement/Order Form/Change Request/Other",
+    "scope_of_services": "Managed Services/Time & Material/Hardware/Software/Maintenance/Other",
+    "contract_tag": "expiry classification as defined above"
 }
 
-CONTRACT TEXT:
+Contract text to analyze:
 """
     
     async def extract_metadata(self, contract_text: str, file_id: str) -> Dict:
@@ -144,10 +191,23 @@ CONTRACT TEXT:
         """
         # Define valid options
         valid_contract_types = ["MSA", "SOW", "Amendment", "Agreement", "Order Form", "Change Request", "Other"]
-        valid_scope_types = ["Managed Services", "Time & Material", "Hardware", "Software", "Maintenance"]
+        valid_scope_types = ["Managed Services", "Time & Material", "Hardware", "Software", "Maintenance", "Other"]
+        valid_contract_status = ["Active", "Draft", "Expired"]
+        valid_contract_tags = [
+            "Expiry < 30 days", 
+            "Expiry 30 to 90 days", 
+            "Expiry 90 days to 1 year", 
+            "Expiry > 1 year", 
+            "Expired", 
+            "No expiry date"
+        ]
         
         # Ensure all required fields exist
-        required_fields = ["start_date", "end_date", "vendor_name", "contract_value", "contract_type", "scope_of_services"]
+        required_fields = [
+            "contract_name", "start_date", "end_date", "vendor_name", "contract_duration",
+            "contract_value_local", "currency", "contract_value_usd",
+            "contract_status", "contract_type", "scope_of_services", "contract_tag"
+        ]
         for field in required_fields:
             if field not in metadata or metadata[field] is None:
                 metadata[field] = "NA"
@@ -158,12 +218,26 @@ CONTRACT TEXT:
         
         # Validate scope of services  
         if metadata.get("scope_of_services") not in valid_scope_types:
-            metadata["scope_of_services"] = "NA"
+            metadata["scope_of_services"] = "Other"
+            
+        # Validate contract status
+        if metadata.get("contract_status") not in valid_contract_status:
+            metadata["contract_status"] = "NA"
+            
+        # Validate contract tag
+        if metadata.get("contract_tag") not in valid_contract_tags:
+            metadata["contract_tag"] = "No expiry date"
         
         # Clean up empty strings
         for key, value in metadata.items():
             if isinstance(value, str) and value.strip() == "":
                 metadata[key] = "NA"
+                
+        # Keep legacy contract_value field for backward compatibility
+        if "contract_value_local" in metadata and metadata["contract_value_local"] != "NA":
+            metadata["contract_value"] = metadata["contract_value_local"]
+        else:
+            metadata["contract_value"] = "NA"
         
         return metadata
     
@@ -172,12 +246,19 @@ CONTRACT TEXT:
         Return default metadata structure when extraction fails
         """
         return {
+            "contract_name": "NA",
             "start_date": "NA",
             "end_date": "NA",
-            "vendor_name": "NA", 
-            "contract_value": "NA",
+            "vendor_name": "NA",
+            "contract_duration": "NA",
+            "contract_value_local": "NA",
+            "currency": "NA",
+            "contract_value_usd": "NA",
+            "contract_status": "NA",
             "contract_type": "Other",
-            "scope_of_services": "NA"
+            "scope_of_services": "Other",
+            "contract_tag": "No expiry date",
+            "contract_value": "NA"  # Legacy field for backward compatibility
         }
 
 metadata_extraction_service = MetadataExtractionService()

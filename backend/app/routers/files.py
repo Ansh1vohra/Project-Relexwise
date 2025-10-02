@@ -109,17 +109,17 @@ async def upload_files(
         failed_uploads_count=len(failed_uploads)
     )
 
-@router.get("/files", response_model=List[FileSchema])
+@router.get("/files", response_model=List[FileWithMetadataSchema])
 async def get_files(
     limit: int = 50,
     offset: int = 0,
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Get list of uploaded files with their processing status
+    Get list of uploaded files with their processing status and metadata
     """
     try:
-        stmt = select(File).offset(offset).limit(limit)
+        stmt = select(File).options(selectinload(File.file_metadata)).offset(offset).limit(limit)
         result = await db.execute(stmt)
         files = result.scalars().all()
         
@@ -294,6 +294,73 @@ async def delete_file(
         logger.error(f"Error deleting file {file_id}: {str(e)}")
         await db.rollback()
         raise HTTPException(status_code=500, detail="Error deleting file")
+
+@router.get("/files/{file_id}/view-url")
+async def get_file_view_url(
+    file_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get a URL for viewing the PDF file in browser
+    """
+    try:
+        # Get file from database
+        query = select(File).where(File.id == file_id)
+        result = await db.execute(query)
+        file = result.scalar_one_or_none()
+        
+        if not file:
+            raise HTTPException(status_code=404, detail="File not found")
+        
+        # Generate view URL
+        view_url = cloudinary_service.get_pdf_view_url(str(file.cloudinary_public_id))
+        
+        if not view_url:
+            raise HTTPException(status_code=500, detail="Failed to generate view URL")
+        
+        return {"view_url": view_url}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting view URL for file {file_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/files/{file_id}/download-url")
+async def get_file_download_url(
+    file_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get a URL for downloading the PDF file with proper filename
+    """
+    try:
+        # Get file from database
+        query = select(File).where(File.id == file_id)
+        result = await db.execute(query)
+        file = result.scalar_one_or_none()
+        
+        if not file:
+            raise HTTPException(status_code=404, detail="File not found")
+        
+        # Generate download URL
+        download_url = cloudinary_service.get_pdf_download_url(
+            str(file.cloudinary_public_id), 
+            str(file.filename)
+        )
+        
+        if not download_url:
+            raise HTTPException(status_code=500, detail="Failed to generate download URL")
+        
+        return {"download_url": download_url}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting download URL for file {file_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
 
 async def _validate_file(file: UploadFile):
     """
