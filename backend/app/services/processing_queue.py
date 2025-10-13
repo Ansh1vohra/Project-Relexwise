@@ -11,6 +11,7 @@ from app.services.pdf_processing import pdf_processing_service
 from app.services.vector_processing_friend import friend_vector_processing_service
 from app.services.metadata_extraction import metadata_extraction_service
 from app.config import settings
+from app.websocket import manager
 import uuid
 
 logger = logging.getLogger(__name__)
@@ -129,6 +130,16 @@ class ProcessingQueue:
                 await self._update_processing_status(db, file_id, "vector_processing_status", "completed")
                 logger.info(f"{worker_name} completed vector processing for {filename}")
                 
+                # Send WebSocket notification for vector processing completion
+                try:
+                    await manager.notify_vector_processing_complete(file_id)
+                    await manager.notify_file_processing_update(
+                        file_id=file_id,
+                        status="vector_completed"
+                    )
+                except Exception as ws_error:
+                    logger.warning(f"Failed to send WebSocket notification for vector completion {file_id}: {ws_error}")
+                
                 # Step 3: Extract metadata
                 logger.info(f"{worker_name} extracting metadata from {filename}")
                 await self._update_processing_status(db, file_id, "metadata_processing_status", "processing")
@@ -141,6 +152,17 @@ class ProcessingQueue:
                 # Mark metadata processing as completed
                 await self._update_processing_status(db, file_id, "metadata_processing_status", "completed")
                 logger.info(f"{worker_name} completed metadata extraction for {filename}")
+                
+                # Send WebSocket notification for metadata extraction completion
+                try:
+                    await manager.notify_metadata_extracted(file_id, metadata)
+                    await manager.notify_file_processing_update(
+                        file_id=file_id,
+                        status="metadata_completed",
+                        metadata=metadata
+                    )
+                except Exception as ws_error:
+                    logger.warning(f"Failed to send WebSocket notification for {file_id}: {ws_error}")
                 
                 # Commit all changes
                 await db.commit()
@@ -184,6 +206,7 @@ class ProcessingQueue:
         db_metadata = FileMetadata(
             id=str(uuid.uuid4()),
             file_id=file_id,
+            contract_name=metadata.get("contract_name"),
             start_date=metadata.get("start_date"),
             end_date=metadata.get("end_date"),
             vendor_name=metadata.get("vendor_name"),
@@ -194,6 +217,7 @@ class ProcessingQueue:
             contract_status=metadata.get("contract_status"),
             contract_type=metadata.get("contract_type"),
             scope_of_services=metadata.get("scope_of_services"),
+            contract_tag=metadata.get("contract_tag"),
             contract_value=metadata.get("contract_value"),  # Legacy field for backward compatibility
             raw_text_length=text_length,
             extraction_timestamp=datetime.utcnow()

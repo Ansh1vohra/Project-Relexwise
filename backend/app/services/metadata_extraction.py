@@ -13,7 +13,7 @@ genai.configure(api_key=settings.google_api_key)
 
 class MetadataExtractionService:
     def __init__(self):
-        self.model = genai.GenerativeModel('gemini-2.0-flash-exp')  # Free experimental model
+        self.model = genai.GenerativeModel('gemini-2.5-flash') 
         self.extraction_prompt = self._build_extraction_prompt()
     
     def _build_extraction_prompt(self) -> str:
@@ -27,138 +27,86 @@ From the following contract text, extract the following details in structured fo
 Each field must return a precise value or "NA" if not available.
 Do not include explanations, only structured output.
 
-Fields to Extract:
+**CORE CONTRACT FIELDS:**
 
-VendorName - Legal name of the counterparty/vendor.
+1. **Contract Name/Title** - Extract the formal title or name of the contract as mentioned in the document header or title section.
 
-StartDate - Effective date or commencement date.
+2. **VendorName** - Legal name of the counterparty/vendor organization.
 
-EndDate - Expiry date or contract end date. If end date is not provided and we have contract duration provided (next column), then autocalculate End Date using Contract Duration - End Date equals Start Date plus contract duration
+3. **StartDate** - Effective date or commencement date (format: YYYY-MM-DD).
 
-Contract Duration - Contract Term, Active Term of the contract. If it's not provided, autocalculate using Start Date and End Date. End Date minus Start Date in Years up to one decimal point.
+4. **EndDate** - Expiry date or contract end date (format: YYYY-MM-DD). If end date is not provided and contract duration is available, auto-calculate: End Date = Start Date + Contract Duration.
 
-ContractValue (Local)→ Total contract value (with number only) in the given currency.
+5. **Contract Duration** - Contract Term/Active Term. If not explicitly stated, auto-calculate using Start Date and End Date. Format as years with one decimal point (e.g., "2.5 years").
 
-Currency → Currency of the contract value (USD, INR, EUR, etc.).
+6. **ContractValue (Local)** - Total contract value (numeric only) in the given currency.
 
-Contract Value (USD) - Convert the Contract Value to US Dollars using the Forex dates from Oanda.
+7. **Currency** - Currency of the contract value (USD, INR, EUR, etc.).
 
-ContractStatus → Classify as one of: "Active", "Draft", "Expired". Draft means that the contract doesn't have any signature or stakeholder names (actual people from both Vendor Side and Customer Side)
+8. **Contract Value (USD)** - Convert the Contract Value to US Dollars using standard exchange rates.
 
-Rule: If StartDate ≤ today ≤ EndDate → Active. If EndDate < today → Expired. If unsigned / marked draft → Draft.
+9. **ContractStatus** - Classify as one of: "Active", "Draft", "Expired"
+   - Rule: If StartDate ≤ today ≤ EndDate → Active
+   - If EndDate < today → Expired  
+   - If unsigned/no signatures/marked draft → Draft
 
-ContractType → Classify as one of: "MSA", "SOW", "Amendment", "Agreement", "Order Form", "Change Request", "Other".
+10. **ContractType** - Classify as one of: "MSA", "SOW", "Amendment", "Agreement", "Order Form", "Change Request", "Other"
 
-ScopeOfServices → Classify as one of: "Managed Services", "Time & Material", "Hardware", "Software", "Maintenance", "Other".
+11. **ScopeOfServices** - Classify as one of: "Managed Services", "Time & Material", "Hardware", "Software", "Maintenance", "Other"
 
-Commercial Terms (Detailed Extraction Guide) - We need to extract the Commercial Terms across respective ScopeOfServices ("Managed Services", "Time & Material", "Hardware", "Software", "Maintenance").
+12. **Contract Tag** - Classify contract expiry status as one of:
+   - "Expiry < 30 days" (if contract expires within 30 days from today)
+   - "Expiry 30 to 90 days" (if contract expires between 30-90 days from today)
+   - "Expiry 90 days to 1 year" (if contract expires between 90 days to 1 year from today)
+   - "Expiry > 1 year" (if contract expires more than 1 year from today)
+   - "Expired" (if contract has already expired)
+   - "No expiry date" (if no end date is specified)
 
-Managed Services - 
-1. TerminationForConvenience
-What to Extract: Does the contract allow either party to terminate without cause? If yes → period of notice (e.g., "90 days' notice").
-Example Clause: "Either party may terminate this Agreement for convenience upon 90 days' prior written notice."
-Expected Output: "90 days"
-If Absent: "NA"
+**COMMERCIAL TERMS EXTRACTION:**
 
-2. LiabilityCap
-What to Extract: The monetary or time-based cap on vendor's liability (e.g., "12 months of fees," "$2 million cap").
-Example Clause: "Vendor's aggregate liability shall not exceed the fees paid in the preceding 12 months."
-Expected Output: "12 months of fees"
-If Absent: "NA"
+Based on the ScopeOfServices classification, extract relevant commercial terms:
 
-PaymentTerms
-What to Extract: Days allowed for invoice settlement (Net 30/45/60).
-Example Clause: "Invoices are payable within 45 days of receipt."
-Expected Output: "Net 45"
-If Absent: "NA"
+**A. Managed Services:**
+- TerminationForConvenience: Notice period for termination without cause (e.g., "90 days")
+- LiabilityCap: Monetary or time-based liability cap (e.g., "12 months of fees")
+- PaymentTerms: Invoice settlement days (e.g., "Net 45")
 
-b. Time & Material
-1. COLA (Cost of Living Adjustment)
-What to Extract: Any reference to annual price adjustment tied to CPI/Inflation indices. Capture % or formula.
-Example Clause: "Charges shall increase annually by the lesser of 5% or the CPI index."
-Expected Output: "5% or CPI annually"
-If Absent: "NA"
-2. FXExposure (Currency/Exchange Clauses)
-What to Extract: Whether contract prices are fixed in one currency or subject to FX fluctuation.
-Example Clause: "All payments shall be made in USD; any FX variations to be borne by Customer."
-Expected Output: "Prices fixed in USD; FX borne by Customer"
-If Absent: "NA"
+**B. Time & Material:**
+- COLA: Annual price adjustment tied to CPI/Inflation (e.g., "5% or CPI annually")
+- FXExposure: Currency risk allocation (e.g., "Prices fixed in USD; FX borne by Customer")
+- VolumeDiscount: Volume discounts based on spend (e.g., "5% at 10M+")
 
-3. Volume Discount
-What to Extract: Volume discount based on Project Size or total spend.
-Example Clause: "5% volume discount on spend beyond $10M"
-Expected Output: 5% at 10M+
-If Absent: "NA"
+**C. Hardware:**
+- WarrantyPeriod: Hardware warranty length (e.g., "12 months")
+- DeliveryRiskAllocation: Risk allocation during shipping (e.g., "Risk passes on delivery")
+- AcceptanceCriteria: Hardware acceptance timeline (e.g., "30 days testing")
 
-c. Hardware
-1. WarrantyPeriod
-What to Extract: Warranty length for hardware (3, 12, 36 months).
-Example Clause: "Vendor warrants hardware for 12 months from delivery."
-Expected Output: "12 months"
-If Absent: "NA"
+**D. Software:**
+- AutoRenewal: Renewal mechanics (e.g., "Auto-renews annually; 60 days notice")
+- COLA: Annual price uplift percentage (e.g., "7% annual uplift")
+- SupportWarranty: Included support duration (e.g., "6 months included support")
 
-2. DeliveryRiskAllocation
-What to Extract: Who bears risk of loss/damage during shipping (Vendor vs Buyer).
-Example Clause: "Risk of loss passes to Customer upon delivery at site."
-Expected Output: "Risk passes on delivery at site"
-If Absent: "NA"
+**E. Maintenance & Support:**
+- EscalationPercentage: Annual fee increases (e.g., "5% per year")
+- AutoRenewal: Renewal mechanics (e.g., "Auto-renews yearly; 30 days notice")
+- SLAPenalties: Service level penalties (e.g., "5% credit if uptime <99.9%")
 
-3. AcceptanceCriteria
-What to Extract: When hardware is deemed "accepted" (on delivery, after inspection, after testing).
-Example Clause: "Acceptance shall occur after 30 days of successful performance testing."
-Expected Output: "30 days testing before acceptance"
-If Absent: "NA"
+**OUTPUT FORMAT:**
+Return the response in the following JSON format with only the main fields for database storage:
 
-d. Software
-1. AutoRenewal
-What to Extract: Does the contract auto-renew? Capture period + notice required.
-Example Clause: "This subscription shall auto-renew annually unless terminated 60 days before expiry."
-Expected Output: "Auto-renews annually; 60 days' notice required"
-If Absent: "NA"
-
-2. COLA (Uplift Clauses)
-What to Extract: Any annual price uplift %.
-Example Clause: "License fees shall increase by 7% annually."
-Expected Output: "7% annual uplift"
-If Absent: "NA"
-
-3. SupportWarranty
-What to Extract: Duration of included support/warranty (e.g., bug fixes, updates).
-Example Clause: "Vendor shall provide 6 months support at no additional charge."
-Expected Output: "6 months included support"
-If Absent: "NA"
-
-e. Maintenance & Support
-1. EscalationPercentage (Annual Increases)
-What to Extract: % annual escalation on fees.
-Example Clause: "Maintenance fees shall increase by 5% annually."
-Expected Output: "5% per year"
-If Absent: "NA"
-
-2. AutoRenewal
-What to Extract: Renewal mechanics for maintenance contract.
-Example Clause: "Agreement auto-renews for 1-year terms unless terminated 30 days before expiry."
-Expected Output: "Auto-renews yearly; 30 days' notice"
-If Absent: "NA"
-
-3. SLAPenalties (Service Credits)
-What to Extract: Penalties for SLA breaches (e.g., % of monthly fee).
-Example Clause: "If uptime falls below 99.9%, Customer entitled to 5% service credit."
-Expected Output: "5% credit if uptime <99.9%"
-If Absent: "NA"
-
-Please return the response in the following JSON format with only the main fields we need to store in the database:
 {
+    "contract_name": "extracted title/name or NA",
     "vendor_name": "extracted value or NA",
-    "start_date": "extracted value or NA",
-    "end_date": "extracted value or NA",
-    "contract_duration": "extracted value or NA",
-    "contract_value_local": "extracted value or NA",
-    "currency": "extracted value or NA",
-    "contract_value_usd": "extracted value or NA",
-    "contract_status": "extracted value or NA",
-    "contract_type": "extracted value or NA",
-    "scope_of_services": "extracted value or NA"
+    "start_date": "YYYY-MM-DD or NA",
+    "end_date": "YYYY-MM-DD or NA", 
+    "contract_duration": "X.X years or NA",
+    "contract_value_local": "numeric value or NA",
+    "currency": "currency code or NA",
+    "contract_value_usd": "USD equivalent or NA",
+    "contract_status": "Active/Draft/Expired or NA",
+    "contract_type": "MSA/SOW/Amendment/Agreement/Order Form/Change Request/Other",
+    "scope_of_services": "Managed Services/Time & Material/Hardware/Software/Maintenance/Other",
+    "contract_tag": "expiry classification as defined above"
 }
 
 Contract text to analyze:
@@ -245,12 +193,20 @@ Contract text to analyze:
         valid_contract_types = ["MSA", "SOW", "Amendment", "Agreement", "Order Form", "Change Request", "Other"]
         valid_scope_types = ["Managed Services", "Time & Material", "Hardware", "Software", "Maintenance", "Other"]
         valid_contract_status = ["Active", "Draft", "Expired"]
+        valid_contract_tags = [
+            "Expiry < 30 days", 
+            "Expiry 30 to 90 days", 
+            "Expiry 90 days to 1 year", 
+            "Expiry > 1 year", 
+            "Expired", 
+            "No expiry date"
+        ]
         
         # Ensure all required fields exist
         required_fields = [
-            "start_date", "end_date", "vendor_name", "contract_duration",
+            "contract_name", "start_date", "end_date", "vendor_name", "contract_duration",
             "contract_value_local", "currency", "contract_value_usd",
-            "contract_status", "contract_type", "scope_of_services"
+            "contract_status", "contract_type", "scope_of_services", "contract_tag"
         ]
         for field in required_fields:
             if field not in metadata or metadata[field] is None:
@@ -267,6 +223,10 @@ Contract text to analyze:
         # Validate contract status
         if metadata.get("contract_status") not in valid_contract_status:
             metadata["contract_status"] = "NA"
+            
+        # Validate contract tag
+        if metadata.get("contract_tag") not in valid_contract_tags:
+            metadata["contract_tag"] = "No expiry date"
         
         # Clean up empty strings
         for key, value in metadata.items():
@@ -286,6 +246,7 @@ Contract text to analyze:
         Return default metadata structure when extraction fails
         """
         return {
+            "contract_name": "NA",
             "start_date": "NA",
             "end_date": "NA",
             "vendor_name": "NA",
@@ -296,6 +257,7 @@ Contract text to analyze:
             "contract_status": "NA",
             "contract_type": "Other",
             "scope_of_services": "Other",
+            "contract_tag": "No expiry date",
             "contract_value": "NA"  # Legacy field for backward compatibility
         }
 
