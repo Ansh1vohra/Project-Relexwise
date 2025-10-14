@@ -6,6 +6,7 @@ from typing import Optional
 import aiofiles
 import os
 import tempfile
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,43 @@ class CloudinaryService:
     def __init__(self):
         self.folder = "contracts"  # Cloudinary folder for contracts
     
+    def _sanitize_filename(self, filename: str) -> str:
+        """
+        Sanitize filename for use as Cloudinary public_id
+        - Remove file extension
+        - Replace spaces with underscores
+        - Remove special characters except underscores and hyphens
+        - Convert to lowercase
+        - Limit length to avoid issues
+        """
+        # Remove extension
+        name_without_ext = filename.rsplit('.', 1)[0]
+        
+        # Replace spaces with underscores
+        sanitized = name_without_ext.replace(' ', '_')
+        
+        # Remove special characters, keep only alphanumeric, underscores, and hyphens
+        sanitized = re.sub(r'[^a-zA-Z0-9_-]', '', sanitized)
+        
+        # Convert to lowercase
+        sanitized = sanitized.lower()
+        
+        # Remove multiple consecutive underscores
+        sanitized = re.sub(r'_+', '_', sanitized)
+        
+        # Remove leading/trailing underscores
+        sanitized = sanitized.strip('_')
+        
+        # Limit length to 100 characters (Cloudinary limit is higher but this is safe)
+        if len(sanitized) > 100:
+            sanitized = sanitized[:100]
+        
+        # Ensure it's not empty
+        if not sanitized:
+            sanitized = "document"
+            
+        return sanitized
+    
     async def upload_file(self, file_content: bytes, filename: str) -> dict:
         """
         Upload file to Cloudinary
@@ -31,12 +69,15 @@ class CloudinaryService:
                 temp_file.write(file_content)
                 temp_file_path = temp_file.name
             
+            # Sanitize filename for public_id
+            sanitized_name = self._sanitize_filename(filename)
+            
             # Upload to Cloudinary
             result = cloudinary.uploader.upload(
                 temp_file_path,
                 folder=self.folder,
                 resource_type="raw",  # Use 'raw' for PDFs to ensure proper handling
-                public_id=f"{filename.split('.')[0]}_{os.urandom(4).hex()}",
+                public_id=f"{sanitized_name}_{os.urandom(4).hex()}",
                 overwrite=False,
                 flags="attachment"  # This ensures the PDF opens properly in browser
             )

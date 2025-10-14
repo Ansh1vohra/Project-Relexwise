@@ -56,6 +56,24 @@ class FileMetadataSchema(BaseModel):
     scope_of_services: Optional[str] = None
     contract_tag: Optional[str] = None
     contract_value: Optional[str] = None  # Legacy field for backward compatibility
+    
+    # Commercial terms fields
+    auto_renewal: Optional[str] = None
+    payment_terms: Optional[str] = None
+    liability_cap: Optional[str] = None
+    termination_for_convenience: Optional[str] = None
+    price_escalation: Optional[str] = None
+    
+    # Risk scoring fields
+    auto_renewal_risk_score: Optional[int] = None
+    payment_terms_risk_score: Optional[int] = None
+    liability_cap_risk_score: Optional[int] = None
+    termination_risk_score: Optional[int] = None
+    price_escalation_risk_score: Optional[int] = None
+    total_risk_score: Optional[float] = None
+    risk_band: Optional[str] = None
+    risk_color: Optional[str] = None
+    
     extraction_timestamp: datetime
     raw_text_length: Optional[int] = None
     confidence_score: Optional[float] = None
