@@ -5,6 +5,8 @@ from typing import Dict, Optional, Any
 import json
 import re
 import asyncio
+from datetime import datetime, timedelta
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +17,182 @@ class MetadataExtractionService:
     def __init__(self):
         self.model = genai.GenerativeModel('gemini-2.5-flash') 
         self.extraction_prompt = self._build_extraction_prompt()
+    
+    def _normalize_date(self, date_string: str) -> str:
+        """
+        Normalize date string to DD-MM-YYYY format
+        """
+        if not date_string or date_string.strip().lower() in ['na', '', 'n/a']:
+            return "NA"
+        
+        date_string = date_string.strip()
+        
+        # Common date patterns to try
+        date_patterns = [
+            "%Y-%m-%d",      # 2024-12-31
+            "%d-%m-%Y",      # 31-12-2024
+            "%m-%d-%Y",      # 12-31-2024
+            "%d/%m/%Y",      # 31/12/2024
+            "%m/%d/%Y",      # 12/31/2024
+            "%Y/%m/%d",      # 2024/12/31
+            "%d.%m.%Y",      # 31.12.2024
+            "%Y.%m.%d",      # 2024.12.31
+            "%B %d, %Y",     # December 31, 2024
+            "%b %d, %Y",     # Dec 31, 2024
+            "%d %B %Y",      # 31 December 2024
+            "%d %b %Y",      # 31 Dec 2024
+        ]
+        
+        for pattern in date_patterns:
+            try:
+                parsed_date = datetime.strptime(date_string, pattern)
+                return parsed_date.strftime("%d-%m-%Y")
+            except ValueError:
+                continue
+        
+        # Try to extract date with regex for more flexible parsing
+        # Look for patterns like "31st December 2024", "Dec 31, 2024", etc.
+        import re
+        
+        # Remove ordinal suffixes (1st, 2nd, 3rd, 4th, etc.)
+        cleaned_date = re.sub(r'(\d+)(st|nd|rd|th)', r'\1', date_string)
+        
+        for pattern in date_patterns:
+            try:
+                parsed_date = datetime.strptime(cleaned_date, pattern)
+                return parsed_date.strftime("%d-%m-%Y")
+            except ValueError:
+                continue
+        
+        logger.warning(f"Could not parse date format: {date_string}")
+        return date_string  # Return original if parsing fails
+    
+    def _convert_currency_to_usd(self, amount_str: str, currency: str) -> str:
+        """
+        Convert local currency amount to USD
+        """
+        if not amount_str or amount_str.strip().lower() in ['na', '', 'n/a']:
+            return "NA"
+        
+        if not currency or currency.strip().lower() in ['na', '', 'n/a']:
+            return "NA"
+        
+        # Clean the amount string
+        cleaned_amount = re.sub(r'[^\d.,]', '', amount_str.strip())
+        
+        # Handle different number formats
+        if ',' in cleaned_amount and '.' in cleaned_amount:
+            # Assume comma is thousands separator and dot is decimal
+            cleaned_amount = cleaned_amount.replace(',', '')
+        elif ',' in cleaned_amount:
+            # Could be either thousands separator or decimal separator
+            # If more than 3 digits after comma, it's likely decimal
+            parts = cleaned_amount.split(',')
+            if len(parts) == 2 and len(parts[1]) <= 3:
+                # Likely thousands separator
+                cleaned_amount = cleaned_amount.replace(',', '')
+            else:
+                # Likely decimal separator
+                cleaned_amount = cleaned_amount.replace(',', '.')
+        
+        try:
+            amount = float(cleaned_amount)
+        except ValueError:
+            logger.warning(f"Could not parse amount: {amount_str}")
+            return "NA"
+        
+        # If already in USD, return as is
+        if currency.upper() in ['USD', 'US$', '$']:
+            return f"{amount:.2f}"
+        
+        # Simple exchange rates (in production, use a real API like Fixer.io or CurrencyAPI)
+        # These are approximate rates as of 2024
+        exchange_rates = {
+            'EUR': 1.08,    # 1 EUR = 1.08 USD
+            'GBP': 1.26,    # 1 GBP = 1.26 USD
+            'INR': 0.012,   # 1 INR = 0.012 USD
+            'JPY': 0.0067,  # 1 JPY = 0.0067 USD
+            'CAD': 0.74,    # 1 CAD = 0.74 USD
+            'AUD': 0.66,    # 1 AUD = 0.66 USD
+            'CHF': 1.10,    # 1 CHF = 1.10 USD
+            'CNY': 0.14,    # 1 CNY = 0.14 USD
+            'SGD': 0.74,    # 1 SGD = 0.74 USD
+        }
+        
+        # Try to get exchange rate
+        rate = exchange_rates.get(currency.upper())
+        if rate:
+            usd_amount = amount * rate
+            return f"{usd_amount:.2f}"
+        
+        # If currency not found, try to get from a free API (optional)
+        try:
+            # Using a simple exchange rate API (you might want to use a more reliable one)
+            response = requests.get(f"https://api.exchangerate-api.com/v4/latest/{currency.upper()}", timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                usd_rate = data.get('rates', {}).get('USD')
+                if usd_rate:
+                    usd_amount = amount * usd_rate
+                    return f"{usd_amount:.2f}"
+        except Exception as e:
+            logger.warning(f"Could not fetch exchange rate for {currency}: {str(e)}")
+        
+        logger.warning(f"No exchange rate found for currency: {currency}")
+        return "NA"
+    
+    def _calculate_contract_status_and_tag(self, start_date: str, end_date: str, metadata: Dict) -> tuple:
+        """
+        Calculate contract status and tag based on dates and content
+        """
+        current_date = datetime.now()
+        
+        # Check if it's a draft based on missing signatures/stakeholders
+        vendor_name = metadata.get('vendor_name', 'NA').strip()
+        if vendor_name in ['NA', '', 'n/a'] or len(vendor_name) < 3:
+            return "Draft", "NA"
+        
+        # Try to parse dates
+        try:
+            if start_date and start_date not in ['NA', '', 'n/a']:
+                start_dt = datetime.strptime(start_date, "%d-%m-%Y")
+            else:
+                start_dt = None
+                
+            if end_date and end_date not in ['NA', '', 'n/a']:
+                end_dt = datetime.strptime(end_date, "%d-%m-%Y")
+            else:
+                end_dt = None
+        except ValueError:
+            # If date parsing fails, default to Draft
+            return "Draft", "NA"
+        
+        # Determine status based on dates
+        if start_dt is None and end_dt is None:
+            status = "Draft"
+        elif start_dt is None:
+            status = "Draft"
+        elif end_dt is None:
+            status = "Active"  # No end date means ongoing
+        elif end_dt < current_date:
+            status = "Expired"
+        elif start_dt <= current_date <= end_dt:
+            status = "Active"
+        else:
+            status = "Draft"  # Future contract
+        
+        # Calculate contract tag
+        tag = "NA"
+        if status == "Active" and end_dt:
+            days_to_expiry = (end_dt - current_date).days
+            if days_to_expiry < 30:
+                tag = "Expiry < 30 days"
+            elif 30 <= days_to_expiry <= 90:
+                tag = "Expiry 30 to 90 days"
+            elif days_to_expiry > 90:
+                tag = "Expiry > 90 days"
+        
+        return status, tag
     
     def _build_extraction_prompt(self) -> str:
         """
@@ -32,9 +210,9 @@ Fields to Extract:
 
 VendorName - Legal name of the counterparty/vendor.
 
-StartDate - Effective date or commencement date.
+StartDate - Effective date or commencement date. Format as "DD-MM-YYYY" (e.g., 31-12-2024).
 
-EndDate - Expiry date or contract end date. If end date is not provided and we have contract duration provided (next column), then autocalculate End Date using Contract Duration - End Date equals Start Date plus contract duration
+EndDate - Expiry date or contract end date. Format as "DD-MM-YYYY" (e.g., 31-12-2025). If end date is not provided and we have contract duration provided (next column), then autocalculate End Date using Contract Duration - End Date equals Start Date plus contract duration
 
 Contract Duration - Contract Term, Active Term of the contract. If it's not provided, autocalculate using Start Date and End Date. End Date minus Start Date in Years up to one decimal point.
 
@@ -42,11 +220,16 @@ ContractValue (Local)→ Total contract value (with number only) in the given cu
 
 Currency → Currency of the contract value (USD, INR, EUR, etc.).
 
-Contract Value (USD) - Convert the Contract Value to US Dollars using the Forex dates from Oanda.
+Contract Value (USD) - Convert the Contract Value to US Dollars using current exchange rates. If contract is already in USD, return the same value. Provide numeric value only (e.g., 50000.00).
 
-ContractStatus → Classify as one of: "Active", "Draft", "Expired". Draft means that the contract doesn't have any signature or stakeholder names (actual people from both Vendor Side and Customer Side)
+ContractStatus → Classify as one of: "Active", "Draft", "Expired". 
 
-Rule: If StartDate ≤ today ≤ EndDate → Active. If EndDate < today → Expired. If unsigned / marked draft → Draft.
+Draft means that the contract doesn't have any signature or stakeholder names (actual people from both Vendor Side and Customer Side), OR if it appears to be a template/unsigned document.
+
+Business Logic (system will verify this):
+- If StartDate ≤ today ≤ EndDate → Active
+- If EndDate < today → Expired  
+- If unsigned / marked draft / no clear parties → Draft
 
 ContractType → Classify as one of: "MSA", "SOW", "Amendment", "Agreement", "Order Form", "Change Request", "Other".
 
@@ -64,6 +247,46 @@ Commercial Terms - Extract the following 5 key commercial clauses:
 
 5. priceEscalation - Look for "annual increase", "uplift", "CPI-based escalation". Example output: "5% annual uplift", "CPI + 2%". If absent: "NA".
 
+Risk Scoring - Calculate risk scores (0-2 scale) for each commercial term:
+
+Risk Scale: 0 = Low Risk, 1 = Medium Risk, 2 = High Risk
+
+1. auto_renewal_risk_score:
+   - 0: No auto-renewal OR clear 90+ days termination notice
+   - 1: Auto-renewal with 30-89 days notice
+   - 2: Auto-renewal with <30 days notice OR unclear termination terms
+
+2. payment_terms_risk_score:
+   - 0: Net 30 days or better
+   - 1: Net 31-60 days
+   - 2: Net 60+ days OR unclear payment terms
+
+3. liability_cap_risk_score:
+   - 0: Liability capped at contract value or less
+   - 1: Liability capped above contract value but reasonable
+   - 2: No liability cap OR unlimited liability
+
+4. termination_convenience_risk_score:
+   - 0: Can terminate for convenience with reasonable notice
+   - 1: Can terminate but with penalties or long notice
+   - 2: Cannot terminate for convenience OR severe penalties
+
+5. price_escalation_risk_score:
+   - 0: No price escalation OR capped at inflation rate
+   - 1: Price escalation 3-5% annually
+   - 2: Price escalation >5% annually OR uncapped escalation
+
+Calculate overall_risk_score as weighted average:
+- auto_renewal_risk_score: 20% weight (0.20)
+- payment_terms_risk_score: 25% weight (0.25)
+- liability_cap_risk_score: 30% weight (0.30)
+- termination_convenience_risk_score: 15% weight (0.15)
+- price_escalation_risk_score: 10% weight (0.10)
+
+Formula: overall_risk_score = (auto_renewal_risk_score * 0.20) + (payment_terms_risk_score * 0.25) + (liability_cap_risk_score * 0.30) + (termination_convenience_risk_score * 0.15) + (price_escalation_risk_score * 0.10)
+
+Round overall_risk_score to 2 decimal places.
+
 Please return the response in the following JSON format:
 {
     "vendor_name": "extracted value or NA",
@@ -80,7 +303,13 @@ Please return the response in the following JSON format:
     "payment_terms": "extracted value or NA",
     "liability_cap": "extracted value or NA",
     "termination_for_convenience": "extracted value or NA",
-    "price_escalation": "extracted value or NA"
+    "price_escalation": "extracted value or NA",
+    "auto_renewal_risk_score": 0,
+    "payment_terms_risk_score": 0,
+    "liability_cap_risk_score": 0,
+    "termination_convenience_risk_score": 0,
+    "price_escalation_risk_score": 0,
+    "overall_risk_score": 0.00
 }
 
 Contract text to analyze:
@@ -104,10 +333,6 @@ Contract text to analyze:
             
             # Validate and clean the metadata
             cleaned_metadata = self._validate_and_clean_metadata(metadata)
-            
-            # Calculate risk scores
-            risk_scores = self._calculate_risk_scores(cleaned_metadata)
-            cleaned_metadata.update(risk_scores)
             
             logger.info(f"Successfully extracted metadata for file {file_id}")
             return cleaned_metadata
@@ -165,7 +390,7 @@ Contract text to analyze:
     
     def _validate_and_clean_metadata(self, metadata: Dict) -> Dict:
         """
-        Validate and clean the extracted metadata
+        Validate and clean the extracted metadata with date normalization and currency conversion
         """
         # Define valid options
         valid_contract_types = ["MSA", "SOW", "Amendment", "Agreement", "Order Form", "Change Request", "Other"]
@@ -174,10 +399,8 @@ Contract text to analyze:
         valid_contract_tags = [
             "Expiry < 30 days", 
             "Expiry 30 to 90 days", 
-            "Expiry 90 days to 1 year", 
-            "Expiry > 1 year", 
-            "Expired", 
-            "No expiry date"
+            "Expiry > 90 days", 
+            "NA"
         ]
         
         # Ensure all required fields exist
@@ -191,23 +414,38 @@ Contract text to analyze:
             if field not in metadata or metadata[field] is None:
                 metadata[field] = "NA"
         
-        # Validate contract type
+        # 1. Normalize dates to DD-MM-YYYY format
+        metadata["start_date"] = self._normalize_date(str(metadata.get("start_date", "NA")))
+        metadata["end_date"] = self._normalize_date(str(metadata.get("end_date", "NA")))
+        
+        # 2. Convert currency to USD if needed
+        local_value = metadata.get("contract_value_local", "NA")
+        currency = metadata.get("currency", "NA")
+        
+        # If LLM didn't provide USD conversion or provided "NA", calculate it ourselves
+        if metadata.get("contract_value_usd") in ["NA", "", None]:
+            metadata["contract_value_usd"] = self._convert_currency_to_usd(local_value, currency)
+        
+        # 3. Calculate proper contract status and tag based on dates and business logic
+        calculated_status, calculated_tag = self._calculate_contract_status_and_tag(
+            metadata["start_date"], 
+            metadata["end_date"], 
+            metadata
+        )
+        
+        # Override LLM status with calculated status for consistency
+        metadata["contract_status"] = calculated_status
+        metadata["contract_tag"] = calculated_tag
+        
+        # 4. Validate contract type
         if metadata.get("contract_type") not in valid_contract_types:
             metadata["contract_type"] = "Other"
         
-        # Validate scope of services  
+        # 5. Validate scope of services  
         if metadata.get("scope_of_services") not in valid_scope_types:
             metadata["scope_of_services"] = "Other"
-            
-        # Validate contract status
-        if metadata.get("contract_status") not in valid_contract_status:
-            metadata["contract_status"] = "NA"
-            
-        # Validate contract tag
-        if metadata.get("contract_tag") not in valid_contract_tags:
-            metadata["contract_tag"] = "No expiry date"
         
-        # Clean up empty strings and convert all non-string values to strings
+        # 6. Clean up empty strings and convert all non-string values to strings
         for key, value in metadata.items():
             if value is None:
                 metadata[key] = "NA"
@@ -216,12 +454,24 @@ Contract text to analyze:
             elif not isinstance(value, str):
                 # Convert all non-string values (int, float, etc.) to strings
                 metadata[key] = str(value)
-                
-        # Keep legacy contract_value field for backward compatibility
+        
+        # 7. Keep legacy contract_value field for backward compatibility
         if "contract_value_local" in metadata and metadata["contract_value_local"] != "NA":
             metadata["contract_value"] = metadata["contract_value_local"]
         else:
             metadata["contract_value"] = "NA"
+        
+        # 8. Add contract_name if not provided (use filename or vendor name as fallback)
+        if metadata.get("contract_name", "NA") == "NA":
+            vendor_name = metadata.get("vendor_name", "NA")
+            if vendor_name != "NA":
+                metadata["contract_name"] = f"Contract with {vendor_name}"
+            else:
+                metadata["contract_name"] = "NA"
+        
+        logger.info(f"Processed metadata - Status: {metadata['contract_status']}, Tag: {metadata['contract_tag']}, "
+                   f"Start: {metadata['start_date']}, End: {metadata['end_date']}, "
+                   f"Local Value: {metadata['contract_value_local']}, USD Value: {metadata['contract_value_usd']}")
         
         return metadata
     
@@ -242,7 +492,7 @@ Contract text to analyze:
             "contract_type": "Other",
             "scope_of_services": "Other",
             "contract_tag": "No expiry date",
-            "contract_value": "NA",  # Legacy field for backward compatibility
+            "contract_value": "NA",  
             "auto_renewal": "NA",
             "payment_terms": "NA",
             "liability_cap": "NA",
@@ -250,130 +500,4 @@ Contract text to analyze:
             "price_escalation": "NA"
         }
     
-    def _calculate_risk_scores(self, metadata: Dict) -> Dict:
-        """
-        Calculate risk scores for commercial terms based on extracted data
-        """
-        # Extract commercial terms
-        auto_renewal = metadata.get("auto_renewal", "NA").lower()
-        payment_terms = metadata.get("payment_terms", "NA").lower()
-        liability_cap = metadata.get("liability_cap", "NA").lower()
-        termination_convenience = metadata.get("termination_for_convenience", "NA").lower()
-        price_escalation = metadata.get("price_escalation", "NA").lower()
-        
-        # Auto-Renewal Risk Scoring
-        auto_renewal_risk = self._score_auto_renewal(auto_renewal)
-        
-        # Payment Terms Risk Scoring
-        payment_terms_risk = self._score_payment_terms(payment_terms)
-        
-        # Liability Cap Risk Scoring
-        liability_cap_risk = self._score_liability_cap(liability_cap)
-        
-        # Termination for Convenience Risk Scoring
-        termination_risk = self._score_termination_convenience(termination_convenience)
-        
-        # Price Escalation Risk Scoring
-        price_escalation_risk = self._score_price_escalation(price_escalation)
-        
-        # Calculate weighted average
-        # Liability Cap = 30%, T4C = 20%, Auto-Renewal = 20%, Price Escalation = 15%, Payment Terms = 15%
-        total_weighted_score = (
-            liability_cap_risk * 0.30 +
-            termination_risk * 0.20 +
-            auto_renewal_risk * 0.20 +
-            price_escalation_risk * 0.15 +
-            payment_terms_risk * 0.15
-        )
-        
-        # Determine risk banding
-        if total_weighted_score <= 4:
-            risk_band = "High Risk"
-            risk_color = "Red"
-        elif total_weighted_score <= 7:
-            risk_band = "Medium Risk"
-            risk_color = "Amber"
-        else:
-            risk_band = "Low Risk"
-            risk_color = "Green"
-        
-        return {
-            # Preserve original commercial terms values
-            "auto_renewal": metadata.get("auto_renewal", "NA"),
-            "payment_terms": metadata.get("payment_terms", "NA"),
-            "liability_cap": metadata.get("liability_cap", "NA"),
-            "termination_for_convenience": metadata.get("termination_for_convenience", "NA"),
-            "price_escalation": metadata.get("price_escalation", "NA"),
-            # Add risk scores
-            "auto_renewal_risk_score": auto_renewal_risk,
-            "payment_terms_risk_score": payment_terms_risk,
-            "liability_cap_risk_score": liability_cap_risk,
-            "termination_risk_score": termination_risk,
-            "price_escalation_risk_score": price_escalation_risk,
-            "total_risk_score": round(total_weighted_score, 2),
-            "risk_band": risk_band,
-            "risk_color": risk_color
-        }
-    
-    def _score_auto_renewal(self, auto_renewal: str) -> int:
-        """Score auto-renewal clause (0=High Risk, 1=Medium Risk, 2=Low Risk)"""
-        if auto_renewal == "na" or "no auto" in auto_renewal or "manual" in auto_renewal:
-            return 2  # Manual renewal only (favorable)
-        elif "30" in auto_renewal and "90" not in auto_renewal:
-            return 1  # 30-90 days notice
-        elif any(term in auto_renewal for term in ["auto", "renew", "automatic"]):
-            if any(days in auto_renewal for days in ["30", "60", "90"]):
-                return 1  # Medium risk - some notice period
-            else:
-                return 0  # High risk - auto renewal with no/short notice
-        return 1  # Default medium risk
-    
-    def _score_payment_terms(self, payment_terms: str) -> int:
-        """Score payment terms (0=High Risk, 1=Medium Risk, 2=Low Risk)"""
-        if payment_terms == "na":
-            return 1  # Default medium risk
-        elif any(term in payment_terms for term in ["upfront", "advance", "prepaid"]):
-            return 0  # High risk - upfront payment
-        elif "net 15" in payment_terms or "15 days" in payment_terms:
-            return 0  # High risk - short payment terms
-        elif "net 30" in payment_terms or "30 days" in payment_terms:
-            return 1  # Medium risk - standard terms
-        elif any(term in payment_terms for term in ["net 45", "net 60", "net 90", "45 days", "60 days", "90 days", "milestone"]):
-            return 2  # Low risk - client-friendly terms
-        return 1  # Default medium risk
-    
-    def _score_liability_cap(self, liability_cap: str) -> int:
-        """Score liability cap (0=High Risk, 1=Medium Risk, 2=Low Risk)"""
-        if liability_cap == "na" or "no cap" in liability_cap or "unlimited" in liability_cap:
-            return 0  # High risk - no protection
-        elif any(term in liability_cap for term in ["3 months", "6 months"]):
-            return 0  # High risk - very low cap
-        elif "12 months" in liability_cap:
-            return 1  # Medium risk - standard cap
-        elif any(term in liability_cap for term in ["contract value", "total fees", "unlimited for", "mutual"]):
-            return 2  # Low risk - generous cap
-        return 1  # Default medium risk
-    
-    def _score_termination_convenience(self, termination: str) -> int:
-        """Score termination for convenience (0=High Risk, 1=Medium Risk, 2=Low Risk)"""
-        if termination == "na" or "no termination" in termination or "not allowed" in termination:
-            return 0  # High risk - locked in
-        elif any(term in termination for term in ["180 days", "6 months", "12 months"]):
-            return 1  # Medium risk - long notice
-        elif any(term in termination for term in ["30 days", "60 days", "90 days"]):
-            return 2  # Low risk - reasonable notice
-        return 1  # Default medium risk
-    
-    def _score_price_escalation(self, escalation: str) -> int:
-        """Score price escalation (0=High Risk, 1=Medium Risk, 2=Low Risk)"""
-        if escalation == "na" or "no escalation" in escalation or "fixed" in escalation:
-            return 2  # Low risk - no escalation
-        elif "mutual" in escalation or "by agreement" in escalation:
-            return 2  # Low risk - mutual agreement required
-        elif "cpi" in escalation or any(pct in escalation for pct in ["3%", "4%", "5%"]):
-            return 1  # Medium risk - reasonable escalation
-        elif any(pct in escalation for pct in ["6%", "7%", "8%", "9%", "10%"]) or "discretion" in escalation:
-            return 0  # High risk - high escalation or vendor discretion
-        return 1  # Default medium risk
-
 metadata_extraction_service = MetadataExtractionService()

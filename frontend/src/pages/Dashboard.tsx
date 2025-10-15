@@ -18,6 +18,7 @@ import {
   Plus,
   Zap
 } from 'lucide-react';
+import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, Area, AreaChart } from 'recharts';
 import { apiService, ContractFileWithMetadata } from '../services/api';
 import webSocketService from '../services/websocket';
 
@@ -35,11 +36,29 @@ const Dashboard = () => {
   const [expiringContracts, setExpiringContracts] = useState(0);
   const [riskScore] = useState(7.2);
   
+  // Chart data states
+  const [contractStatusData, setContractStatusData] = useState<Array<{name: string, value: number, color: string}>>([]);
+  const [renewalPipelineData, setRenewalPipelineData] = useState<Array<{period: string, contracts: number, value: number, displayValue: string}>>([]);
+  const [spendByScopeData, setSpendByScopeData] = useState<Array<{name: string, value: number, color: string, displayValue: string, contracts: number}>>([]);
+  const [renewalTimelineData, setRenewalTimelineData] = useState<Array<{month: string, contracts: number, value: number, displayValue: string}>>([]);
+  
   // UI State
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilters, setStatusFilters] = useState<string[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(10);
+
+  // Muted, professional color palette for charts
+  const chartColors = [
+    '#64748b', // slate gray
+    '#94a3b8', // light slate
+    '#60a5fa', // blue
+    '#a3a3a3', // gray
+    '#6ee7b7', // soft green
+    '#facc15', // muted yellow
+    '#f87171', // muted red
+    '#cbd5e1', // lightest slate
+  ];
 
   // Load contract data on component mount
   useEffect(() => {
@@ -71,6 +90,235 @@ const Dashboard = () => {
     };
   }, []);
 
+  // Calculate chart data from contract files
+  const calculateChartData = (files: ContractFileWithMetadata[]) => {
+    // Contract Status Overview Chart Data
+    const statusCounts = { Active: 0, Expired: 0, Draft: 0 };
+    const currentDate = new Date();
+    
+    files.forEach(file => {
+      const metadata = file.file_metadata;
+      if (metadata?.contract_status) {
+        const status = metadata.contract_status;
+        if (status === 'Active') statusCounts.Active++;
+        else if (status === 'Expired') statusCounts.Expired++;
+        else if (status === 'Draft') statusCounts.Draft++;
+      } else {
+        // Fallback logic if contract_status is not available
+        if (metadata?.end_date) {
+          const endDate = new Date(metadata.end_date);
+          if (endDate < currentDate) statusCounts.Expired++;
+          else statusCounts.Active++;
+        } else {
+          statusCounts.Draft++;
+        }
+      }
+    });
+
+    // Use professional muted colors for status chart
+    const contractStatusChartData = [
+      { name: 'Active', value: statusCounts.Active, color: chartColors[2] },
+      { name: 'Expired', value: statusCounts.Expired, color: chartColors[6] },
+      { name: 'Draft', value: statusCounts.Draft, color: chartColors[0] }
+    ].filter(item => item.value > 0); // Only show categories with data
+
+    setContractStatusData(contractStatusChartData);
+
+    // Renewal Pipeline Chart Data
+    const thirtyDaysFromNow = new Date(currentDate.getTime() + (30 * 24 * 60 * 60 * 1000));
+    const ninetyDaysFromNow = new Date(currentDate.getTime() + (90 * 24 * 60 * 60 * 1000));
+
+    const pipeline = {
+      lessThan30: { contracts: 0, value: 0 },
+      between30And90: { contracts: 0, value: 0 },
+      moreThan90: { contracts: 0, value: 0 }
+    };
+
+    files.forEach(file => {
+      const metadata = file.file_metadata;
+      if (metadata?.end_date) {
+        const endDate = new Date(metadata.end_date);
+        
+        // Only consider future dates (contracts that haven't expired yet)
+        if (endDate > currentDate) {
+          // Parse contract value
+          let contractValue = 0;
+          if (metadata.contract_value_usd && metadata.contract_value_usd !== 'N/A') {
+            let cleanValue = metadata.contract_value_usd
+              .replace(/[$,€£¥₹]/g, '')
+              .replace(/[^0-9.-]/g, '');
+            
+            const multiplier = cleanValue.includes('K') ? 1000 : 
+                             cleanValue.includes('M') ? 1000000 : 
+                             cleanValue.includes('B') ? 1000000000 : 1;
+            
+            cleanValue = cleanValue.replace(/[KMB]/gi, '');
+            const value = parseFloat(cleanValue) * multiplier;
+            
+            if (!isNaN(value) && value > 0) {
+              contractValue = value;
+            }
+          }
+
+          if (endDate <= thirtyDaysFromNow) {
+            pipeline.lessThan30.contracts++;
+            pipeline.lessThan30.value += contractValue;
+          } else if (endDate <= ninetyDaysFromNow) {
+            pipeline.between30And90.contracts++;
+            pipeline.between30And90.value += contractValue;
+          } else {
+            pipeline.moreThan90.contracts++;
+            pipeline.moreThan90.value += contractValue;
+          }
+        }
+      }
+    });
+
+    const formatValue = (value: number) => {
+      if (value >= 1000000000) return `$${(value / 1000000000).toFixed(1)}B`;
+      if (value >= 1000000) return `$${(value / 1000000).toFixed(1)}M`;
+      if (value >= 1000) return `$${(value / 1000).toFixed(1)}K`;
+      return `$${value.toFixed(0)}`;
+    };
+
+    const renewalPipelineChartData = [
+      { 
+        period: '<30 days', 
+        contracts: pipeline.lessThan30.contracts, 
+        value: pipeline.lessThan30.value,
+        displayValue: formatValue(pipeline.lessThan30.value)
+      },
+      { 
+        period: '30-90 days', 
+        contracts: pipeline.between30And90.contracts, 
+        value: pipeline.between30And90.value,
+        displayValue: formatValue(pipeline.between30And90.value)
+      },
+      { 
+        period: '>90 days', 
+        contracts: pipeline.moreThan90.contracts, 
+        value: pipeline.moreThan90.value,
+        displayValue: formatValue(pipeline.moreThan90.value)
+      }
+    ];
+
+    setRenewalPipelineData(renewalPipelineChartData);
+
+    // Spend by Scope/Category Chart Data
+    const scopeCounts = new Map<string, { contracts: number, value: number }>();
+    
+    files.forEach(file => {
+      const metadata = file.file_metadata;
+      const scope = metadata?.scope_of_services || 'Other';
+      
+      // Parse contract value
+      let contractValue = 0;
+      if (metadata?.contract_value_usd && metadata.contract_value_usd !== 'N/A') {
+        let cleanValue = metadata.contract_value_usd
+          .replace(/[$,€£¥₹]/g, '')
+          .replace(/[^0-9.-]/g, '');
+        
+        const multiplier = cleanValue.includes('K') ? 1000 : 
+                         cleanValue.includes('M') ? 1000000 : 
+                         cleanValue.includes('B') ? 1000000000 : 1;
+        
+        cleanValue = cleanValue.replace(/[KMB]/gi, '');
+        const value = parseFloat(cleanValue) * multiplier;
+        
+        if (!isNaN(value) && value > 0) {
+          contractValue = value;
+        }
+      }
+
+      if (!scopeCounts.has(scope)) {
+        scopeCounts.set(scope, { contracts: 0, value: 0 });
+      }
+      
+      const current = scopeCounts.get(scope)!;
+      scopeCounts.set(scope, {
+        contracts: current.contracts + 1,
+        value: current.value + contractValue
+      });
+    });
+
+    // Use professional muted colors for scope chart
+    const spendByScopeChartData = Array.from(scopeCounts.entries())
+      .map(([scope, data], i) => ({
+        name: scope,
+        value: data.value,
+        contracts: data.contracts,
+        color: chartColors[i % chartColors.length],
+        displayValue: formatValue(data.value)
+      }))
+      .filter(item => item.value > 0)
+      .sort((a, b) => b.value - a.value);
+
+    setSpendByScopeData(spendByScopeChartData);
+
+    // Upcoming Renewals Timeline Chart Data
+    const monthCounts = new Map<string, { contracts: number, value: number }>();
+    const today = new Date();
+    const oneYearFromNow = new Date(today.getTime() + (365 * 24 * 60 * 60 * 1000));
+
+    files.forEach(file => {
+      const metadata = file.file_metadata;
+      if (metadata?.end_date) {
+        const endDate = new Date(metadata.end_date);
+        
+        // Only consider contracts expiring in the next year
+        if (endDate > today && endDate <= oneYearFromNow) {
+          const monthKey = endDate.toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
+          
+          // Parse contract value
+          let contractValue = 0;
+          if (metadata.contract_value_usd && metadata.contract_value_usd !== 'N/A') {
+            let cleanValue = metadata.contract_value_usd
+              .replace(/[$,€£¥₹]/g, '')
+              .replace(/[^0-9.-]/g, '');
+            
+            const multiplier = cleanValue.includes('K') ? 1000 : 
+                             cleanValue.includes('M') ? 1000000 : 
+                             cleanValue.includes('B') ? 1000000000 : 1;
+            
+            cleanValue = cleanValue.replace(/[KMB]/gi, '');
+            const value = parseFloat(cleanValue) * multiplier;
+            
+            if (!isNaN(value) && value > 0) {
+              contractValue = value;
+            }
+          }
+
+          if (!monthCounts.has(monthKey)) {
+            monthCounts.set(monthKey, { contracts: 0, value: 0 });
+          }
+          
+          const current = monthCounts.get(monthKey)!;
+          monthCounts.set(monthKey, {
+            contracts: current.contracts + 1,
+            value: current.value + contractValue
+          });
+        }
+      }
+    });
+
+    // Generate timeline for next 12 months
+    const timelineData = [];
+    for (let i = 0; i < 12; i++) {
+      const date = new Date(today.getFullYear(), today.getMonth() + i, 1);
+      const monthKey = date.toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
+      const data = monthCounts.get(monthKey) || { contracts: 0, value: 0 };
+      
+      timelineData.push({
+        month: monthKey,
+        contracts: data.contracts,
+        value: data.value,
+        displayValue: formatValue(data.value)
+      });
+    }
+
+    setRenewalTimelineData(timelineData);
+  };
+
   const loadContractData = async () => {
     try {
       setLoading(true);
@@ -94,13 +342,13 @@ const Dashboard = () => {
         
         setActiveContracts(completedFiles.length);
         
-        // Calculate total value from Contract Value column (contract_value field)
+        // Calculate total value from Contract Value column (contract_value_usd field)
         let totalValueNum = 0;
         completedFiles.forEach(file => {
           const metadata = file.file_metadata;
-          if (metadata?.contract_value && metadata.contract_value !== 'N/A') {
+          if (metadata?.contract_value_usd && metadata.contract_value_usd !== 'N/A') {
             // Remove currency symbols, commas, and non-numeric characters except decimal point and negative sign
-            let cleanValue = metadata.contract_value
+            let cleanValue = metadata.contract_value_usd
               .replace(/[$,€£¥₹]/g, '') // Remove common currency symbols
               .replace(/[^0-9.-]/g, ''); // Remove any other non-numeric characters
             
@@ -139,6 +387,9 @@ const Dashboard = () => {
         });
         
         setExpiringContracts(expiring.length);
+        
+        // Calculate chart data
+        calculateChartData(completedFiles);
       }
     } catch (err) {
       setError('Failed to load contract data');
@@ -274,7 +525,7 @@ const Dashboard = () => {
       name: file.filename.replace('.pdf', ''),
       type: metadata?.contract_type || 'N/A',
       vendor: metadata?.vendor_name || 'N/A',
-      contractValue: metadata?.contract_value || 'N/A', // Main contract value field
+      contractValue: metadata?.contract_value_usd || 'N/A', // Main contract value field
       contractValueLocal: metadata?.contract_value_local || 'N/A', // Separate local value
       currency: metadata?.currency || 'N/A', // Separate currency
       status: metadata?.contract_status || 'N/A',
@@ -290,7 +541,7 @@ const Dashboard = () => {
       // Legacy fields for compatibility
       localValue: metadata?.contract_value_local || 'N/A',
       localCurrency: metadata?.currency || 'N/A',
-      usdValue: metadata?.contract_value || 'N/A',
+      usdValue: metadata?.contract_value_usd || 'N/A',
       tag: metadata?.contract_type || 'Contract'
     };
   });
@@ -380,7 +631,7 @@ const Dashboard = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
+    <div className="min-h-screen">
       
       <div className="w-full px-4 sm:px-6 lg:px-8 py-8">
         {/* Welcome Section */}
@@ -429,6 +680,7 @@ const Dashboard = () => {
           )}
         </div>
 
+       
         {/* Key Metrics */}
         <div className="mb-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
           <div className="bg-green-50 border border-green-200 rounded-xl p-5">
@@ -459,6 +711,8 @@ const Dashboard = () => {
             <div className="text-3xl font-bold text-rose-900">{loading ? '...' : filteredMetrics.vendorCount}</div>
           </div>
         </div>
+        
+
 
         {/* Contracts Table Section */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col">
@@ -557,18 +811,18 @@ const Dashboard = () => {
               <table className="w-full">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    {/* <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       <input type="checkbox" className="rounded border-gray-300" />
-                    </th>
+                    </th> */}
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contract</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vendor</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Start Date</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">End Date</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contract Value</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Local Value</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Currency</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Start Date</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">End Date</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Scope</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                   </tr>
@@ -576,9 +830,9 @@ const Dashboard = () => {
                 <tbody className="bg-white divide-y divide-gray-200">
                   {currentContracts.map((contract, index) => (
                     <tr key={contract.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      {/* <td className="px-6 py-4 whitespace-nowrap">
                         <input type="checkbox" className="rounded border-gray-300" />
-                      </td>
+                      </td> */}
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div>
                           <button 
@@ -595,6 +849,8 @@ const Dashboard = () => {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{contract.type}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{contract.vendor}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{contract.startDate}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{contract.endDate}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{contract.contractValue}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{contract.contractValueLocal}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{contract.currency}</td>
@@ -608,8 +864,6 @@ const Dashboard = () => {
                           {contract.status}
                         </span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{contract.startDate}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{contract.endDate}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900" title={contract.scope}>
                         {contract.scope.length > 20 ? `${contract.scope.substring(0, 20)}...` : contract.scope}
                       </td>
@@ -726,6 +980,177 @@ const Dashboard = () => {
             </div>
           </div>
         </div>
+
+        {/* Dashboard Charts */}
+        <div className="my-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Contract Status Overview Chart */}
+          <div className="bg-white border border-gray-200 rounded-xl p-6">
+            <h3 className="text-base font-semibold text-gray-800 mb-4">Contract Status Overview</h3>
+            {loading ? (
+              <div className="h-64 flex items-center justify-center">
+                <div className="text-gray-400">Loading chart data...</div>
+              </div>
+            ) : contractStatusData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={220}>
+                <PieChart>
+                  <Pie
+                    data={contractStatusData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={50}
+                    outerRadius={80}
+                    paddingAngle={2}
+                    dataKey="value"
+                  >
+                    {contractStatusData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    wrapperStyle={{ fontSize: 13 }}
+                    contentStyle={{ background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 6 }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-64 flex items-center justify-center">
+                <div className="text-gray-400">No data available</div>
+              </div>
+            )}
+            <div className="flex justify-center space-x-6 mt-4">
+              {contractStatusData.map((entry, index) => (
+                <div key={index} className="flex items-center space-x-2">
+                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: entry.color }}></div>
+                  <span className="text-xs text-gray-600">{entry.name} ({entry.value})</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Renewal Pipeline Chart */}
+          <div className="bg-white border border-gray-200 rounded-xl p-6">
+            <h3 className="text-base font-semibold text-gray-800 mb-4">Renewal Pipeline</h3>
+            {loading ? (
+              <div className="h-64 flex items-center justify-center">
+                <div className="text-gray-400">Loading chart data...</div>
+              </div>
+            ) : renewalPipelineData.some(item => item.contracts > 0) ? (
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={renewalPipelineData} margin={{ top: 20, right: 30, left: 20, bottom: 40 }}>
+                  <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
+                  <XAxis dataKey="period" tick={{ fontSize: 12, fill: '#64748b' }} interval={0} angle={-20} textAnchor="end" height={40} />
+                  <YAxis tick={{ fontSize: 12, fill: '#64748b' }} />
+                  <Tooltip wrapperStyle={{ fontSize: 13 }} contentStyle={{ background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 6 }} />
+                  <Bar dataKey="contracts" fill={chartColors[2]} barSize={28} radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-64 flex items-center justify-center">
+                <div className="text-gray-400">No renewal data available</div>
+              </div>
+            )}
+            <div className="mt-4 grid grid-cols-3 gap-4 text-center">
+              {renewalPipelineData.map((item, index) => (
+                <div key={index} className="bg-gray-50 border border-gray-200 p-3 rounded-lg">
+                  <div className="text-xs font-medium text-gray-600">{item.period}</div>
+                  <div className="text-base font-bold text-gray-700">{item.contracts}</div>
+                  <div className="text-xs text-gray-400">{item.displayValue}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+         {/* Additional Dashboard Charts - Row 2 */}
+        <div className="mb-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Spend by Scope/Category Chart */}
+          <div className="bg-white border border-gray-200 rounded-xl p-6">
+            <h3 className="text-base font-semibold text-gray-800 mb-4">Spend by Scope / Category</h3>
+            {loading ? (
+              <div className="h-64 flex items-center justify-center">
+                <div className="text-gray-400">Loading chart data...</div>
+              </div>
+            ) : spendByScopeData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={220}>
+                <PieChart>
+                  <Pie
+                    data={spendByScopeData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={50}
+                    outerRadius={80}
+                    paddingAngle={2}
+                    dataKey="value"
+                  >
+                    {spendByScopeData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    wrapperStyle={{ fontSize: 13 }}
+                    contentStyle={{ background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 6 }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-64 flex items-center justify-center">
+                <div className="text-gray-400">No scope data available</div>
+              </div>
+            )}
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              {spendByScopeData.map((entry, index) => (
+                <div key={index} className="flex items-center space-x-2">
+                  <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: entry.color }}></div>
+                  <span className="text-xs text-gray-600 truncate">{entry.name}</span>
+                  <span className="text-xs text-gray-400 ml-auto">({entry.contracts})</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Upcoming Renewals Timeline Chart */}
+          <div className="bg-white border border-gray-200 rounded-xl p-6 col-span-2">
+            <h3 className="text-base font-semibold text-gray-800 mb-4">Upcoming Renewals Timeline</h3>
+            {loading ? (
+              <div className="h-64 flex items-center justify-center">
+                <div className="text-gray-400">Loading chart data...</div>
+              </div>
+            ) : renewalTimelineData.some(item => item.contracts > 0) ? (
+              <ResponsiveContainer width="100%" height={220}>
+                <AreaChart data={renewalTimelineData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="colorRenewals" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#64748b" stopOpacity={0.18}/>
+                      <stop offset="95%" stopColor="#64748b" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <XAxis dataKey="month" tick={{ fontSize: 12, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 12, fill: '#64748b' }} axisLine={false} tickLine={false} width={30} />
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                  <Tooltip
+                    wrapperStyle={{ fontSize: 13 }}
+                    contentStyle={{ background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 6 }}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="contracts"
+                    stroke="#64748b"
+                    fillOpacity={1}
+                    fill="url(#colorRenewals)"
+                    dot={{ r: 2, fill: '#64748b' }}
+                    activeDot={{ r: 4, fill: '#334155', stroke: '#64748b', strokeWidth: 1 }}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-64 flex items-center justify-center">
+                <div className="text-gray-400">No renewal data available</div>
+              </div>
+            )}
+          </div>
+        </div>
+
+
         {/* Footer */}
         <footer className="mt-12 text-center text-sm text-gray-500">
           <p>© 2025 ReLexWise. Transforming contracts with AI-powered intelligence.</p>
