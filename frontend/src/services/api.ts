@@ -31,6 +31,24 @@ export interface FileMetadata {
   scope_of_services?: string;
   contract_tag?: string;
   contract_value?: string;
+  
+  // Commercial terms fields
+  auto_renewal?: string;
+  payment_terms?: string;
+  liability_cap?: string;
+  termination_for_convenience?: string;
+  price_escalation?: string;
+  
+  // Risk scoring fields
+  auto_renewal_risk_score?: number;
+  payment_terms_risk_score?: number;
+  liability_cap_risk_score?: number;
+  termination_risk_score?: number;
+  price_escalation_risk_score?: number;
+  total_risk_score?: number;
+  risk_band?: string;
+  risk_color?: string;
+  
   extraction_timestamp: string;
   raw_text_length?: number;
   confidence_score?: number;
