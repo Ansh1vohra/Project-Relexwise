@@ -220,6 +220,112 @@ export default function ContractDetailPage() {
                       <p className="text-gray-900">{contract.file_metadata.scope_of_services}</p>
                     </div>
                   )}
+                  
+                  {/* Commercial Terms Section */}
+                  {(contract.file_metadata.auto_renewal || 
+                    contract.file_metadata.payment_terms || 
+                    contract.file_metadata.liability_cap || 
+                    contract.file_metadata.termination_for_convenience || 
+                    contract.file_metadata.price_escalation) && (
+                    <div className="border-t pt-4 mt-4">
+                      <h3 className="text-md font-semibold text-gray-900 mb-3">Commercial Terms</h3>
+                      <div className="space-y-3">
+                        {contract.file_metadata.auto_renewal && contract.file_metadata.auto_renewal !== 'N/A' && (
+                          <div>
+                            <label className="text-sm font-medium text-gray-500">Auto Renewal</label>
+                            <p className="text-gray-900">{contract.file_metadata.auto_renewal}</p>
+                          </div>
+                        )}
+                        
+                        {contract.file_metadata.payment_terms && contract.file_metadata.payment_terms !== 'N/A' && (
+                          <div>
+                            <label className="text-sm font-medium text-gray-500">Payment Terms</label>
+                            <p className="text-gray-900">{contract.file_metadata.payment_terms}</p>
+                          </div>
+                        )}
+                        
+                        {contract.file_metadata.liability_cap && contract.file_metadata.liability_cap !== 'N/A' && (
+                          <div>
+                            <label className="text-sm font-medium text-gray-500">Liability Cap</label>
+                            <p className="text-gray-900">{contract.file_metadata.liability_cap}</p>
+                          </div>
+                        )}
+                        
+                        {contract.file_metadata.termination_for_convenience && contract.file_metadata.termination_for_convenience !== 'N/A' && (
+                          <div>
+                            <label className="text-sm font-medium text-gray-500">Termination for Convenience</label>
+                            <p className="text-gray-900">{contract.file_metadata.termination_for_convenience}</p>
+                          </div>
+                        )}
+                        
+                        {contract.file_metadata.price_escalation && contract.file_metadata.price_escalation !== 'N/A' && (
+                          <div>
+                            <label className="text-sm font-medium text-gray-500">Price Escalation</label>
+                            <p className="text-gray-900">{contract.file_metadata.price_escalation}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Risk Scores Section */}
+                  {(contract.file_metadata.total_risk_score !== null && contract.file_metadata.total_risk_score !== undefined) && (
+                    <div className="border-t pt-4 mt-4">
+                      <h3 className="text-md font-semibold text-gray-900 mb-3">Risk Assessment</h3>
+                      <div className="space-y-3">
+                        <div>
+                          <label className="text-sm font-medium text-gray-500">Overall Risk Score</label>
+                          <div className="flex items-center space-x-2">
+                            <p className="text-gray-900 font-medium">{contract.file_metadata.total_risk_score?.toFixed(1)}</p>
+                            {contract.file_metadata.risk_band && (
+                              <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                                contract.file_metadata.risk_band === 'Low' ? 'bg-green-100 text-green-800' :
+                                contract.file_metadata.risk_band === 'Medium' ? 'bg-yellow-100 text-yellow-800' :
+                                contract.file_metadata.risk_band === 'High' ? 'bg-red-100 text-red-800' :
+                                'bg-gray-100 text-gray-800'
+                              }`}>
+                                {contract.file_metadata.risk_band} Risk
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        
+                        {/* Individual Risk Scores */}
+                        <div className="grid grid-cols-1 gap-2 text-sm">
+                          {contract.file_metadata.auto_renewal_risk_score !== null && contract.file_metadata.auto_renewal_risk_score !== undefined && (
+                            <div className="flex justify-between">
+                              <span className="text-gray-600">Auto Renewal Risk:</span>
+                              <span className="font-medium">{contract.file_metadata.auto_renewal_risk_score}/10</span>
+                            </div>
+                          )}
+                          {contract.file_metadata.payment_terms_risk_score !== null && contract.file_metadata.payment_terms_risk_score !== undefined && (
+                            <div className="flex justify-between">
+                              <span className="text-gray-600">Payment Terms Risk:</span>
+                              <span className="font-medium">{contract.file_metadata.payment_terms_risk_score}/10</span>
+                            </div>
+                          )}
+                          {contract.file_metadata.liability_cap_risk_score !== null && contract.file_metadata.liability_cap_risk_score !== undefined && (
+                            <div className="flex justify-between">
+                              <span className="text-gray-600">Liability Cap Risk:</span>
+                              <span className="font-medium">{contract.file_metadata.liability_cap_risk_score}/10</span>
+                            </div>
+                          )}
+                          {contract.file_metadata.termination_risk_score !== null && contract.file_metadata.termination_risk_score !== undefined && (
+                            <div className="flex justify-between">
+                              <span className="text-gray-600">Termination Risk:</span>
+                              <span className="font-medium">{contract.file_metadata.termination_risk_score}/10</span>
+                            </div>
+                          )}
+                          {contract.file_metadata.price_escalation_risk_score !== null && contract.file_metadata.price_escalation_risk_score !== undefined && (
+                            <div className="flex justify-between">
+                              <span className="text-gray-600">Price Escalation Risk:</span>
+                              <span className="font-medium">{contract.file_metadata.price_escalation_risk_score}/10</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="text-center py-8">

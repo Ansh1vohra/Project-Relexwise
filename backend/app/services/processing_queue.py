@@ -52,6 +52,46 @@ class ProcessingQueue:
         await asyncio.gather(*self.workers, return_exceptions=True)
         self.workers.clear()
     
+    def _safe_int_convert(self, value):
+        """Safely convert a value to integer"""
+        if value is None or value == "" or value == "N/A":
+            return None
+        try:
+            return int(value) if isinstance(value, str) else value
+        except (ValueError, TypeError):
+            return None
+    
+    def _safe_float_convert(self, value):
+        """Safely convert a value to float"""
+        if value is None or value == "" or value == "N/A":
+            return None
+        try:
+            return float(value) if isinstance(value, str) else value
+        except (ValueError, TypeError):
+            return None
+    
+    def _calculate_risk_band(self, risk_score):
+        """Calculate risk band based on risk score"""
+        if risk_score is None:
+            return None
+        if risk_score <= 0.67:
+            return "Low"
+        elif risk_score <= 1.33:
+            return "Medium"
+        else:
+            return "High"
+    
+    def _calculate_risk_color(self, risk_score):
+        """Calculate risk color based on risk score"""
+        if risk_score is None:
+            return None
+        if risk_score <= 0.67:
+            return "green"
+        elif risk_score <= 1.33:
+            return "yellow"
+        else:
+            return "red"
+    
     async def add_file_for_processing(self, file_id: str, file_content: bytes, filename: str):
         """Add a file to the processing queue"""
         task = {
@@ -219,10 +259,36 @@ class ProcessingQueue:
             scope_of_services=metadata.get("scope_of_services"),
             contract_tag=metadata.get("contract_tag"),
             contract_value=metadata.get("contract_value"),  # Legacy field for backward compatibility
+            
+            # Commercial terms - these were missing!
+            auto_renewal=metadata.get("auto_renewal"),
+            payment_terms=metadata.get("payment_terms"),
+            liability_cap=metadata.get("liability_cap"),
+            termination_for_convenience=metadata.get("termination_for_convenience"),
+            price_escalation=metadata.get("price_escalation"),
+            
+            # Risk scores - these were also missing!
+            auto_renewal_risk_score=self._safe_int_convert(metadata.get("auto_renewal_risk_score")),
+            payment_terms_risk_score=self._safe_int_convert(metadata.get("payment_terms_risk_score")),
+            liability_cap_risk_score=self._safe_int_convert(metadata.get("liability_cap_risk_score")),
+            termination_risk_score=self._safe_int_convert(metadata.get("termination_convenience_risk_score")),  # Field name mapping
+            price_escalation_risk_score=self._safe_int_convert(metadata.get("price_escalation_risk_score")),
+            total_risk_score=self._safe_float_convert(metadata.get("overall_risk_score")),  # Field name mapping
+            risk_band=self._calculate_risk_band(self._safe_float_convert(metadata.get("overall_risk_score"))),
+            risk_color=self._calculate_risk_color(self._safe_float_convert(metadata.get("overall_risk_score"))),
+            
+            # Additional fields
             raw_text_length=text_length,
-            extraction_timestamp=datetime.utcnow()
+            extraction_timestamp=datetime.utcnow(),
+            confidence_score=0.95  # Set a default confidence score
         )
         db.add(db_metadata)
+        
+        logger.info(f"Stored metadata including commercial terms for file {file_id}: "
+                   f"Auto-renewal: {metadata.get('auto_renewal')}, "
+                   f"Payment terms: {metadata.get('payment_terms')}, "
+                   f"Liability cap: {metadata.get('liability_cap')}, "
+                   f"Overall risk score: {metadata.get('overall_risk_score')}")
     
     async def _log_processing_error(self, db: AsyncSession, file_id: str, error_type: str, error_message: str, error_details: str):
         """Log processing error to database"""
