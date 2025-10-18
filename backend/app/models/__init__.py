@@ -57,6 +57,23 @@ class FileMetadata(Base):
     # Legacy field for backward compatibility (keeping the old contract_value field)
     contract_value = Column(String, nullable=True)
     
+    # Commercial terms fields
+    auto_renewal = Column(String, nullable=True)
+    payment_terms = Column(String, nullable=True)
+    liability_cap = Column(String, nullable=True)
+    termination_for_convenience = Column(String, nullable=True)
+    price_escalation = Column(String, nullable=True)
+    
+    # Risk scoring fields
+    auto_renewal_risk_score = Column(Integer, nullable=True)
+    payment_terms_risk_score = Column(Integer, nullable=True)
+    liability_cap_risk_score = Column(Integer, nullable=True)
+    termination_risk_score = Column(Integer, nullable=True)
+    price_escalation_risk_score = Column(Integer, nullable=True)
+    total_risk_score = Column(Float, nullable=True)
+    risk_band = Column(String, nullable=True)
+    risk_color = Column(String, nullable=True)
+    
     # Processing info
     extraction_timestamp = Column(DateTime, default=datetime.utcnow)
     raw_text_length = Column(Integer, nullable=True)

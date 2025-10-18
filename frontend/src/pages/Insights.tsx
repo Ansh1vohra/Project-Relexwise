@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, AreaChart, Area, BarChart, Bar } from 'recharts'
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell } from 'recharts'
+import { useDashboardData } from '../hooks/useDashboardData'
 
 const colors = {
   primary: '#1d4ed8',
@@ -14,7 +15,83 @@ export default function Insights() {
   const [activeTab, setActiveTab] = useState<'overview' | 'intelligence' | 'predictions'>('overview')
   const [dateRange, setDateRange] = useState<'30d' | '90d' | 'year'>('90d')
 
-  // Smart Data Processing
+  // Get dashboard data from the custom hook
+  const {
+    contractFiles,
+    loading,
+    error,
+    contractStatusData,
+    renewalPipelineData,
+    spendByScopeData,
+    renewalTimelineData,
+    activeContracts,
+    totalValue,
+    expiringContracts,
+  } = useDashboardData();
+
+  // Chart colors for consistency with Dashboard
+  const chartColors = [
+    '#64748b', '#94a3b8', '#60a5fa', '#a3a3a3', '#6ee7b7', '#facc15', '#f87171', '#cbd5e1',
+  ];
+
+  // Fake data for chart demonstration (when real data is empty)
+  const fakeContractStatusData = [
+    { name: 'Active', value: 45, color: chartColors[2] },
+    { name: 'Expired', value: 12, color: chartColors[6] },
+    { name: 'Draft', value: 8, color: chartColors[0] }
+  ];
+
+  const fakeRenewalPipelineData = [
+    { period: '<30 days', contracts: 8, value: 320000, displayValue: '$320K' },
+    { period: '30-90 days', contracts: 15, value: 850000, displayValue: '$850K' },
+    { period: '>90 days', contracts: 22, value: 1200000, displayValue: '$1.2M' }
+  ];
+
+  const fakeSpendByScopeData = [
+    { name: 'IT Services', value: 1200000, color: chartColors[0], displayValue: '$1.2M', contracts: 15 },
+    { name: 'Consulting', value: 850000, color: chartColors[1], displayValue: '$850K', contracts: 12 },
+    { name: 'Software Licenses', value: 620000, color: chartColors[2], displayValue: '$620K', contracts: 8 },
+    { name: 'Support & Maintenance', value: 450000, color: chartColors[3], displayValue: '$450K', contracts: 10 },
+    { name: 'Other', value: 280000, color: chartColors[4], displayValue: '$280K', contracts: 5 }
+  ];
+
+  const fakeRenewalTimelineData = [
+    { month: 'Oct 2025', contracts: 3, value: 180000, displayValue: '$180K' },
+    { month: 'Nov 2025', contracts: 5, value: 320000, displayValue: '$320K' },
+    { month: 'Dec 2025', contracts: 8, value: 450000, displayValue: '$450K' },
+    { month: 'Jan 2026', contracts: 4, value: 280000, displayValue: '$280K' },
+    { month: 'Feb 2026', contracts: 6, value: 380000, displayValue: '$380K' },
+    { month: 'Mar 2026', contracts: 7, value: 420000, displayValue: '$420K' },
+    { month: 'Apr 2026', contracts: 2, value: 150000, displayValue: '$150K' },
+    { month: 'May 2026', contracts: 3, value: 220000, displayValue: '$220K' },
+    { month: 'Jun 2026', contracts: 5, value: 350000, displayValue: '$350K' },
+    { month: 'Jul 2026', contracts: 4, value: 280000, displayValue: '$280K' },
+    { month: 'Aug 2026', contracts: 6, value: 380000, displayValue: '$380K' },
+    { month: 'Sep 2026', contracts: 3, value: 200000, displayValue: '$200K' }
+  ];
+
+  // Use fake data if real data is empty, otherwise use real data
+  const displayContractStatusData = contractStatusData.length > 0 ? contractStatusData : fakeContractStatusData;
+  const displayRenewalPipelineData = renewalPipelineData.some(item => item.contracts > 0) ? renewalPipelineData : fakeRenewalPipelineData;
+  const displaySpendByScopeData = spendByScopeData.length > 0 ? spendByScopeData : fakeSpendByScopeData;
+  const displayRenewalTimelineData = renewalTimelineData.some(item => item.contracts > 0) ? renewalTimelineData : fakeRenewalTimelineData;
+
+  // Smart Data Processing - Use real data from dashboard or fallback to demo data
+  const contractMetrics = useMemo(() => ({
+    totalValue: totalValue !== '$0' ? totalValue : '$3.4M', // Use demo data if no real data
+    avgContractValue: contractFiles.length > 0 ? 
+      `$${Math.round(parseFloat(totalValue.replace(/[$,KMB]/g, '')) * (totalValue.includes('K') ? 1000 : totalValue.includes('M') ? 1000000 : totalValue.includes('B') ? 1000000000 : 1) / contractFiles.length / 1000)}K` : 
+      '$185K', // Demo average
+    processingRate: '98.5%',
+    complianceScore: 94,
+    riskContracts: 3,
+    renewalsNext90Days: expiringContracts > 0 ? expiringContracts : 12, // Use demo data if no expiring contracts
+    savingsIdentified: '$180K',
+    automationLevel: 85
+  }), [totalValue, contractFiles.length, expiringContracts])
+
+  // Keep existing mock data for other insights (commented but preserved)
+  /*
   const contractMetrics = useMemo(() => ({
     totalValue: '$2.4M',
     avgContractValue: '$180K',
@@ -25,7 +102,9 @@ export default function Insights() {
     savingsIdentified: '$180K',
     automationLevel: 85
   }), [])
+  */
 
+  /* Original insights mock data (preserved for AI features, Risk Matrix, etc.) */
   const valueAnalytics = [
     { month: 'Jul', value: 1.8, forecast: null },
     { month: 'Aug', value: 2.1, forecast: null },
@@ -51,13 +130,20 @@ export default function Insights() {
     { vendor: 'DataVault Ltd', score: 71, contracts: 3, value: '$180K', trend: 'down' }
   ]
 
-  const renewalPipeline = [
-    { month: 'Oct', contracts: 4, value: '$320K', probability: 85 },
-    { month: 'Nov', contracts: 6, value: '$480K', probability: 78 },
-    { month: 'Dec', contracts: 8, value: '$640K', probability: 92 },
-    { month: 'Jan', contracts: 5, value: '$380K', probability: 68 },
-    { month: 'Feb', contracts: 3, value: '$220K', probability: 89 }
-  ]
+  /* Use real renewal pipeline data instead of mock data */
+  const renewalPipeline = renewalPipelineData.length > 0 ? 
+    renewalPipelineData.map((item, index) => ({
+      month: item.period.replace('<', 'Next ').replace('>', 'Beyond '),
+      contracts: item.contracts,
+      value: item.displayValue,
+      probability: 85 - (index * 5) // Simulated probability for display
+    })) : [
+      { month: 'Oct', contracts: 4, value: '$320K', probability: 85 },
+      { month: 'Nov', contracts: 6, value: '$480K', probability: 78 },
+      { month: 'Dec', contracts: 8, value: '$640K', probability: 92 },
+      { month: 'Jan', contracts: 5, value: '$380K', probability: 68 },
+      { month: 'Feb', contracts: 3, value: '$220K', probability: 89 }
+    ]
 
   const aiInsights = [
     {
@@ -154,7 +240,7 @@ export default function Insights() {
             </div>
 
             {/* Executive Metrics Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+            {/* <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
               <div className="bg-white border border-gray-200 rounded-xl p-6">
                 <div className="flex items-center justify-between mb-4">
                   <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
@@ -202,15 +288,198 @@ export default function Insights() {
                 <p className="text-gray-600 text-sm">Renewal Pipeline</p>
                 <p className="text-xs text-gray-500 mt-1">High probability: 8</p>
               </div>
-            </div>
+            </div> */}
 
             {/* Main Content Based on Active Tab */}
             {activeTab === 'overview' && (
               <div className="space-y-8">
                 
+                {/* Dashboard Charts Section - Real Data from Dashboard */}
+                <div className="mb-8">
+                  <div className="flex items-center justify-between mb-6">
+                    <h3 className="text-xl font-bold text-gray-900">Contract Portfolio Analytics</h3>
+                    {(contractStatusData.length === 0 || !renewalPipelineData.some(item => item.contracts > 0)) && (
+                      <span className="text-xs bg-amber-100 text-amber-800 px-2 py-1 rounded-full">
+                        Demo Data - Upload contracts to see real analytics
+                      </span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    
+                    {/* Contract Status Overview Chart */}
+                    <div className="bg-white border border-gray-200 rounded-xl p-6">
+                      <h3 className="text-base font-semibold text-gray-800 mb-4">Contract Status Overview</h3>
+                      {loading ? (
+                        <div className="h-64 flex items-center justify-center">
+                          <div className="text-gray-400">Loading chart data...</div>
+                        </div>
+                      ) : displayContractStatusData.length > 0 ? (
+                        <ResponsiveContainer width="100%" height={220}>
+                          <PieChart>
+                            <Pie
+                              data={displayContractStatusData}
+                              cx="50%"
+                              cy="50%"
+                              innerRadius={50}
+                              outerRadius={80}
+                              paddingAngle={2}
+                              dataKey="value"
+                            >
+                              {displayContractStatusData.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={entry.color} />
+                              ))}
+                            </Pie>
+                            <Tooltip
+                              wrapperStyle={{ fontSize: 13 }}
+                              contentStyle={{ background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 6 }}
+                            />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      ) : (
+                        <div className="h-64 flex items-center justify-center">
+                          <div className="text-gray-400">No data available</div>
+                        </div>
+                      )}
+                      <div className="flex justify-center space-x-6 mt-4">
+                        {displayContractStatusData.map((entry, index) => (
+                          <div key={index} className="flex items-center space-x-2">
+                            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: entry.color }}></div>
+                            <span className="text-xs text-gray-600">{entry.name} ({entry.value})</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Renewal Pipeline Chart */}
+                    <div className="bg-white border border-gray-200 rounded-xl p-6">
+                      <h3 className="text-base font-semibold text-gray-800 mb-4">Renewal Pipeline</h3>
+                      {loading ? (
+                        <div className="h-64 flex items-center justify-center">
+                          <div className="text-gray-400">Loading chart data...</div>
+                        </div>
+                      ) : displayRenewalPipelineData.length > 0 ? (
+                        <ResponsiveContainer width="100%" height={220}>
+                          <BarChart data={displayRenewalPipelineData} margin={{ top: 20, right: 30, left: 20, bottom: 40 }}>
+                            <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
+                            <XAxis dataKey="period" tick={{ fontSize: 12, fill: '#64748b' }} interval={0} angle={-20} textAnchor="end" height={40} />
+                            <YAxis tick={{ fontSize: 12, fill: '#64748b' }} />
+                            <Tooltip wrapperStyle={{ fontSize: 13 }} contentStyle={{ background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 6 }} />
+                            <Bar dataKey="contracts" fill={chartColors[2]} barSize={28} radius={[4, 4, 0, 0]} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      ) : (
+                        <div className="h-64 flex items-center justify-center">
+                          <div className="text-gray-400">No renewal data available</div>
+                        </div>
+                      )}
+                      <div className="mt-4 grid grid-cols-3 gap-4 text-center">
+                        {displayRenewalPipelineData.map((item, index) => (
+                          <div key={index} className="bg-gray-50 border border-gray-200 p-3 rounded-lg">
+                            <div className="text-xs font-medium text-gray-600">{item.period}</div>
+                            <div className="text-base font-bold text-gray-700">{item.contracts}</div>
+                            <div className="text-xs text-gray-400">{item.displayValue}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Additional Dashboard Charts - Row 2 */}
+                  <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Spend by Scope/Category Chart */}
+                    <div className="bg-white border border-gray-200 rounded-xl p-6">
+                      <h3 className="text-base font-semibold text-gray-800 mb-4">Spend by Scope / Category</h3>
+                      {loading ? (
+                        <div className="h-64 flex items-center justify-center">
+                          <div className="text-gray-400">Loading chart data...</div>
+                        </div>
+                      ) : displaySpendByScopeData.length > 0 ? (
+                        <ResponsiveContainer width="100%" height={220}>
+                          <PieChart>
+                            <Pie
+                              data={displaySpendByScopeData}
+                              cx="50%"
+                              cy="50%"
+                              innerRadius={50}
+                              outerRadius={80}
+                              paddingAngle={2}
+                              dataKey="value"
+                            >
+                              {displaySpendByScopeData.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={entry.color} />
+                              ))}
+                            </Pie>
+                            <Tooltip
+                              wrapperStyle={{ fontSize: 13 }}
+                              contentStyle={{ background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 6 }}
+                            />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      ) : (
+                        <div className="h-64 flex items-center justify-center">
+                          <div className="text-gray-400">No scope data available</div>
+                        </div>
+                      )}
+                      <div className="mt-4 grid grid-cols-2 gap-2">
+                        {displaySpendByScopeData.map((entry, index) => (
+                          <div key={index} className="flex items-center space-x-2">
+                            <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: entry.color }}></div>
+                            <span className="text-xs text-gray-600 truncate">{entry.name}</span>
+                            <span className="text-xs text-gray-400 ml-auto">({entry.contracts})</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Upcoming Renewals Timeline Chart */}
+                    <div className="bg-white border border-gray-200 rounded-xl p-6">
+                      <h3 className="text-base font-semibold text-gray-800 mb-4">Upcoming Renewals Timeline</h3>
+                      {loading ? (
+                        <div className="h-64 flex items-center justify-center">
+                          <div className="text-gray-400">Loading chart data...</div>
+                        </div>
+                      ) : displayRenewalTimelineData.length > 0 ? (
+                        <ResponsiveContainer width="100%" height={220}>
+                          <AreaChart data={displayRenewalTimelineData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                            <defs>
+                              <linearGradient id="colorRenewalsInsights" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="#64748b" stopOpacity={0.18}/>
+                                <stop offset="95%" stopColor="#64748b" stopOpacity={0}/>
+                              </linearGradient>
+                            </defs>
+                            <XAxis dataKey="month" tick={{ fontSize: 12, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                            <YAxis tick={{ fontSize: 12, fill: '#64748b' }} axisLine={false} tickLine={false} width={30} />
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                            <Tooltip
+                              wrapperStyle={{ fontSize: 13 }}
+                              contentStyle={{ background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 6 }}
+                            />
+                            <Area
+                              type="monotone"
+                              dataKey="contracts"
+                              stroke="#64748b"
+                              fillOpacity={1}
+                              fill="url(#colorRenewalsInsights)"
+                              dot={{ r: 2, fill: '#64748b' }}
+                              activeDot={{ r: 4, fill: '#334155', stroke: '#64748b', strokeWidth: 1 }}
+                            />
+                          </AreaChart>
+                        </ResponsiveContainer>
+                      ) : (
+                        <div className="h-64 flex items-center justify-center">
+                          <div className="text-gray-400">No renewal data available</div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Original insights content (commented but preserved) */}
+                {/*
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
 
                 {/* Portfolio Value Trends - Enhanced Graph Size with Same Container */}
+                {/*
 <div className="lg:col-span-2 bg-white border border-gray-200 rounded-xl p-6">
   <div className="flex items-center justify-between mb-6">
     <h3 className="text-lg font-semibold text-gray-900">Portfolio Value Trends</h3>
@@ -222,185 +491,31 @@ export default function Insights() {
     </div>
   </div>
   
-  {/* Keep original container height but optimize internal space */}
-  <div className="h-96 relative bg-gradient-to-b from-gray-50 to-white rounded-lg">
-    
-    {/* Enhanced SVG with better internal scaling */}
-    <svg className="w-full h-full" viewBox="0 0 900 400">
-      <defs>
-        <linearGradient id="barGradient1" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" style={{ stopColor: '#ef4444', stopOpacity: 0.9 }} />
-          <stop offset="100%" style={{ stopColor: '#dc2626', stopOpacity: 1 }} />
-        </linearGradient>
-        
-        <linearGradient id="barGradient2" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" style={{ stopColor: '#f59e0b', stopOpacity: 0.9 }} />
-          <stop offset="100%" style={{ stopColor: '#d97706', stopOpacity: 1 }} />
-        </linearGradient>
-        
-        <linearGradient id="barGradient3" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" style={{ stopColor: '#06b6d4', stopOpacity: 0.9 }} />
-          <stop offset="100%" style={{ stopColor: '#0891b2', stopOpacity: 1 }} />
-        </linearGradient>
-        
-        <linearGradient id="barGradient4" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" style={{ stopColor: '#3b82f6', stopOpacity: 0.9 }} />
-          <stop offset="100%" style={{ stopColor: '#2563eb', stopOpacity: 1 }} />
-        </linearGradient>
-        
-        <linearGradient id="barGradient5" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" style={{ stopColor: '#1d4ed8', stopOpacity: 0.9 }} />
-          <stop offset="100%" style={{ stopColor: '#1e40af', stopOpacity: 1 }} />
-        </linearGradient>
-      </defs>
-
-      {/* Enhanced Grid Lines - Larger spacing */}
-      <g stroke="#f3f4f6" strokeWidth="1" opacity="0.5">
-        {/* Horizontal grid lines */}
-        <line x1="80" y1="70" x2="720" y2="70" />
-        <line x1="80" y1="120" x2="720" y2="120" />
-        <line x1="80" y1="170" x2="720" y2="170" />
-        <line x1="80" y1="220" x2="720" y2="220" />
-        <line x1="80" y1="270" x2="720" y2="270" />
-        <line x1="80" y1="320" x2="720" y2="320" />
-        
-        {/* Vertical grid lines with better spacing */}
-        <line x1="140" y1="70" x2="140" y2="320" />
-        <line x1="240" y1="70" x2="240" y2="320" />
-        <line x1="340" y1="70" x2="340" y2="320" />
-        <line x1="440" y1="70" x2="440" y2="320" />
-        <line x1="540" y1="70" x2="540" y2="320" />
-        <line x1="640" y1="70" x2="640" y2="320" />
-      </g>
-
-      {/* X and Y Axes */}
-      <g stroke="#6b7280" strokeWidth="2">
-        <line x1="80" y1="320" x2="720" y2="320" /> {/* X-axis */}
-        <line x1="80" y1="70" x2="80" y2="320" />   {/* Y-axis */}
-      </g>
-
-      {/* Y-axis Labels */}
-      <g className="text-sm fill-gray-600" textAnchor="end">
-        <text x="75" y="75">$3.0M</text>
-        <text x="75" y="125">$2.5M</text>
-        <text x="75" y="175">$2.0M</text>
-        <text x="75" y="225">$1.5M</text>
-        <text x="75" y="275">$1.0M</text>
-        <text x="75" y="325">$0.5M</text>
-      </g>
-
-      {/* Larger 3D Bars with More Spacing */}
-      
-      {/* Smaller 3D Bars with Proper Spacing */}
-      {/* Medium-sized 3D Bars with Good Spacing */}
-
-{/* Jul - Bar 1 */}
-<g>
-  <path d="M 125 320 L 125 270 L 155 260 L 155 310 Z" fill="url(#barGradient1)">
-    <animate attributeName="d" 
-             values="M 125 320 L 125 320 L 155 310 L 155 310 Z;M 125 320 L 125 270 L 155 260 L 155 310 Z"
-             dur="1.5s" begin="0s" />
-  </path>
-  <path d="M 125 270 L 155 260 L 180 270 L 155 280 Z" fill="#f87171" opacity="0.8"/>
-  <path d="M 155 260 L 155 310 L 180 300 L 180 270 Z" fill="#dc2626" opacity="0.6"/>
-</g>
-
-{/* Aug - Bar 2 */}
-<g>
-  <path d="M 215 320 L 215 220 L 245 210 L 245 280 Z" fill="url(#barGradient2)">
-    <animate attributeName="d" 
-             values="M 215 320 L 215 320 L 245 310 L 245 310 Z;M 215 320 L 215 220 L 245 210 L 245 280 Z"
-             dur="1.5s" begin="0.3s" />
-  </path>
-  <path d="M 215 220 L 245 210 L 270 220 L 245 230 Z" fill="#fbbf24" opacity="0.8"/>
-  <path d="M 245 210 L 245 280 L 270 270 L 270 220 Z" fill="#d97706" opacity="0.6"/>
-</g>
-
-{/* Sep - Bar 3 */}
-<g>
-  <path d="M 305 320 L 305 180 L 335 170 L 335 240 Z" fill="url(#barGradient3)">
-    <animate attributeName="d" 
-             values="M 305 320 L 305 320 L 335 310 L 335 310 Z;M 305 320 L 305 180 L 335 170 L 335 240 Z"
-             dur="1.5s" begin="0.6s" />
-  </path>
-  <path d="M 305 180 L 335 170 L 360 180 L 335 190 Z" fill="#67e8f9" opacity="0.8"/>
-  <path d="M 335 170 L 335 240 L 360 230 L 360 180 Z" fill="#0891b2" opacity="0.6"/>
-</g>
-
-{/* Oct - Bar 4 (Forecast) */}
-<g opacity="0.8">
-  <path d="M 395 320 L 395 150 L 425 140 L 425 210 Z" fill="url(#barGradient4)" strokeDasharray="6 3" stroke="#3b82f6" strokeWidth="2">
-    <animate attributeName="d" 
-             values="M 395 320 L 395 320 L 425 310 L 425 310 Z;M 395 320 L 395 150 L 425 140 L 425 210 Z"
-             dur="1.5s" begin="0.9s" />
-  </path>
-  <path d="M 395 150 L 425 140 L 450 150 L 425 160 Z" fill="#93c5fd" opacity="0.8" strokeDasharray="6 3" stroke="#3b82f6" strokeWidth="1"/>
-  <path d="M 425 140 L 425 210 L 450 200 L 450 150 Z" fill="#2563eb" opacity="0.6" strokeDasharray="6 3" stroke="#2563eb" strokeWidth="1"/>
-</g>
-
-{/* Nov - Bar 5 (Forecast) */}
-<g opacity="0.8">
-  <path d="M 485 320 L 485 100 L 515 90 L 515 160 Z" fill="url(#barGradient5)" strokeDasharray="6 3" stroke="#1d4ed8" strokeWidth="2">
-    <animate attributeName="d" 
-             values="M 485 320 L 485 320 L 515 310 L 515 310 Z;M 485 320 L 485 100 L 515 90 L 515 160 Z"
-             dur="1.5s" begin="1.2s" />
-  </path>
-  <path d="M 485 100 L 515 90 L 540 100 L 515 110 Z" fill="#a5b4fc" opacity="0.8" strokeDasharray="6 3" stroke="#1d4ed8" strokeWidth="1"/>
-  <path d="M 515 90 L 515 160 L 540 150 L 540 100 Z" fill="#1e40af" opacity="0.6" strokeDasharray="6 3" stroke="#1e40af" strokeWidth="1"/>
-</g>
-
-
-
-
-
-      {/* X-axis Labels - Better positioned */}
-      <g className="text-sm font-medium fill-gray-600" textAnchor="middle">
-        <text x="160" y="345">Jul</text>
-        <text x="260" y="345">Aug</text>
-        <text x="360" y="345">Sep</text>
-        <text x="460" y="345">Oct</text>
-        <text x="560" y="345">Nov</text>
-      </g>
-
-    </svg>
-
-    {/* Right-Side Legend - Same position, better spacing */}
-    <div className="absolute top-16 right-4 space-y-4 text-xs">
-      <div className="flex items-center space-x-3">
-        <div className="w-4 h-0.5 bg-red-500"></div>
-        <span className="text-gray-600">Contract Acquisition</span>
-      </div>
-      <div className="flex items-center space-x-3">
-        <div className="w-4 h-0.5 bg-orange-500"></div>
-        <span className="text-gray-600">Portfolio Growth</span>
-      </div>
-      <div className="flex items-center space-x-3">
-        <div className="w-4 h-0.5 bg-cyan-500"></div>
-        <span className="text-gray-600">Market Expansion</span>
-      </div>
-      <div className="flex items-center space-x-3">
-        <div className="w-4 h-0.5 bg-blue-500"></div>
-        <span className="text-gray-600">Revenue Projection</span>
-      </div>
-      <div className="flex items-center space-x-3">
-        <div className="w-4 h-0.5 bg-blue-800"></div>
-        <span className="text-gray-600">Target Achievement</span>
-      </div>
-    </div>
-
+  {/* ... original complex SVG chart ... */}
+                {/*
   </div>
-</div>
-
-
-
-                  
+  */}
                 
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
 
-                  
-
-
-                  
-
+                  {/* Simplified Portfolio Value Trends */}
+                  {/* <div className="lg:col-span-2 bg-white border border-gray-200 rounded-xl p-6">
+                    <div className="flex items-center justify-between mb-6">
+                      <h3 className="text-lg font-semibold text-gray-900">Portfolio Value Trends</h3>
+                      <div className="flex items-center space-x-2">
+                        <span className="text-sm text-gray-500">Actual</span>
+                        <div className="w-4 h-0.5 bg-blue-600"></div>
+                        <span className="text-sm text-gray-500">Forecast</span>
+                        <div className="w-4 h-0.5 bg-blue-300 border-dashed"></div>
+                      </div>
+                    </div>
+                    
+                    <div className="h-80 bg-gradient-to-b from-gray-50 to-white rounded-lg p-4">
+                      <div className="text-center text-gray-500">
+                        Portfolio analytics visualization based on real contract data shown above
+                      </div>
+                    </div>
+                  </div> */}
 
                   {/* Risk Heat Map - Unique Alternative */}
                   <div className="bg-white border border-gray-200 rounded-xl p-6">
@@ -606,4 +721,3 @@ export default function Insights() {
     </div>
   )
 }
-
