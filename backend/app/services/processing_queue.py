@@ -92,16 +92,18 @@ class ProcessingQueue:
         else:
             return "red"
     
-    async def add_file_for_processing(self, file_id: str, file_content: bytes, filename: str):
+    async def add_file_for_processing(self, file_id: str, file_content: bytes, filename: str, user_id: str = None, tenant_id: str = None):
         """Add a file to the processing queue"""
         task = {
             "file_id": file_id,
             "file_content": file_content,
             "filename": filename,
-            "timestamp": datetime.utcnow()
+            "timestamp": datetime.utcnow(),
+            "user_id": user_id,
+            "tenant_id": tenant_id,
         }
         await self.queue.put(task)
-        logger.info(f"Added file {filename} ({file_id}) to processing queue")
+        logger.info(f"Added file {filename} ({file_id}) to processing queue with user_id: {user_id}, tenant_id: {tenant_id}")
     
     async def _worker(self, worker_name: str):
         """Worker process to handle file processing"""
@@ -115,6 +117,8 @@ class ProcessingQueue:
                 file_id = task["file_id"]
                 file_content = task["file_content"]
                 filename = task["filename"]
+                user_id = task["user_id"]
+                tennant_id = task["tenant_id"]
                 
                 logger.info(f"{worker_name} processing file: {filename} ({file_id})")
                 
@@ -122,7 +126,7 @@ class ProcessingQueue:
                 max_retries = 3
                 for attempt in range(1, max_retries + 1):
                     try:
-                        await self._process_file(file_id, file_content, filename, worker_name)
+                        await self._process_file(file_id, file_content, filename, worker_name,user_id, tennant_id)
                         break  # Success, exit retry loop
                     except Exception as e:
                         logger.error(f"{worker_name} error processing {filename} (attempt {attempt}): {str(e)}")
@@ -148,7 +152,7 @@ class ProcessingQueue:
         
         logger.info(f"Stopped worker: {worker_name}")
     
-    async def _process_file(self, file_id: str, file_content: bytes, filename: str, worker_name: str):
+    async def _process_file(self, file_id: str, file_content: bytes, filename: str, worker_name: str,user_id, tenant_id):
         """Process a single file - PDF extraction, vector processing, and metadata extraction"""
         async with AsyncSessionLocal() as db:
             try:
@@ -164,7 +168,7 @@ class ProcessingQueue:
                 
                 # Step 2: Process vectors (chunking, embedding, storing)
                 logger.info(f"{worker_name} processing vectors for {filename}")
-                await friend_vector_processing_service.process_text_to_vectors(file_id, extracted_text)
+                await friend_vector_processing_service.process_text_to_vectors(file_id, extracted_text, user_id, tenant_id)
                 
                 # Mark vector processing as completed
                 await self._update_processing_status(db, file_id, "vector_processing_status", "completed")

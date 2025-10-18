@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     llama_cloud_api_key: str = os.getenv("LLAMA_CLOUD_API_KEY", "")
     google_api_key: str = os.getenv("GOOGLE_API_KEY", "")
     
+    llama_cloud_project_id:str = os.getenv("LLAMA_PROJECT_ID")
+    llama_organizatoin_id: str = os.getenv("LLAMA_ORGANIZATION_ID")
+    
     # Processing settings
     chunk_size: int = 1024
     chunk_overlap: int = 200
@@ -32,5 +35,6 @@ class Settings(BaseSettings):
     
     class Config:
         env_file = ".env"
+        extra = "allow"
 
 settings = Settings()

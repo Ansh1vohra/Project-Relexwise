@@ -17,7 +17,7 @@ class FriendVectorProcessingService:
         self.vector_service = get_vector_search_service()
         logger.info("Friend's vector processing service initialized")
     
-    async def process_pdf_file(self, file_id: str, file_content: bytes, filename: str) -> Dict[str, Any]:
+    async def process_pdf_file(self, file_id: str, file_content: bytes, filename: str, user_id: str = None, tenant_id: str = None) -> Dict[str, Any]:
         """
         Process a PDF file using friend's LlamaIndex approach
         """
@@ -29,14 +29,14 @@ class FriendVectorProcessingService:
             
             logger.info(f"Processing {filename} with friend's LlamaIndex approach")
             
-            # Use friend's upload method
-            result = self.vector_service.upload_pdfs([temp_file_path])
+            # Use friend's upload method with user and tenant info
+            result = self.vector_service.upload_pdfs([temp_file_path], user_id=user_id, tenant_id=tenant_id)
             
             # Clean up temporary file
             os.unlink(temp_file_path)
             
             # Update the metadata for the uploaded documents with our file_id
-            await self._update_document_metadata(file_id, filename)
+            await self._update_document_metadata(file_id, filename, user_id, tenant_id)
             
             logger.info(f"Successfully processed {filename} using friend's system")
             return result
@@ -45,9 +45,9 @@ class FriendVectorProcessingService:
             logger.error(f"Error processing PDF {filename}: {str(e)}")
             return {"status": "error", "message": f"Processing failed: {str(e)}"}
     
-    async def _update_document_metadata(self, file_id: str, filename: str):
+    async def _update_document_metadata(self, file_id: str, filename: str, user_id: str = None, tenant_id: str = None):
         """
-        Update document metadata to include our file_id
+        Update document metadata to include our file_id, user_id, and tenant_id
         """
         try:
             # Get all documents from the collection
@@ -61,20 +61,25 @@ class FriendVectorProcessingService:
                         metadata.get("file_name") == filename and 
                         not metadata.get("original_file_id")):
                         
-                        # Update metadata to include our file_id
+                        # Update metadata to include our file_id, user_id, and tenant_id
                         doc_id = all_docs["ids"][i]
-                        updated_metadata = {**metadata, "original_file_id": file_id}
+                        updated_metadata = {
+                            **metadata, 
+                            "original_file_id": file_id,
+                            "user_id": user_id,
+                            "tenant_id": tenant_id
+                        }
                         
                         collection.update(
                             ids=[doc_id],
                             metadatas=[updated_metadata]
                         )
-                        logger.info(f"Updated metadata for document {doc_id} with file_id {file_id}")
+                        logger.info(f"Updated metadata for document {doc_id} with file_id {file_id}, user_id {user_id}, tenant_id {tenant_id}")
                         
         except Exception as e:
             logger.warning(f"Could not update document metadata: {str(e)}")
     
-    async def process_text_to_vectors(self, file_id: str, text: str):
+    async def process_text_to_vectors(self, file_id: str, text: str, user_id: str = None, tenant_id: str = None):
         """
         Legacy method for compatibility with existing processing queue
         Now uses friend's approach internally
@@ -84,7 +89,12 @@ class FriendVectorProcessingService:
             # Since friend's system expects PDFs, we'll create a document and let it handle chunking
             document = Document(
                 text=text,
-                metadata={"file_id": file_id, "file_name": f"text_document_{file_id}"}
+                metadata={
+                    "file_id": file_id, 
+                    "file_name": f"text_document_{file_id}",
+                    "user_id": user_id,
+                    "tenant_id": tenant_id
+                }
             )
             
             # Add to friend's index directly
@@ -98,7 +108,7 @@ class FriendVectorProcessingService:
                 # Add to existing index
                 self.vector_service.index.insert(document)
             
-            logger.info(f"Successfully processed text for file_id {file_id}")
+            logger.info(f"Successfully processed text for file_id {file_id} with user_id {user_id}, tenant_id {tenant_id}")
             return {"status": "success", "message": "Text processed successfully"}
             
         except Exception as e:

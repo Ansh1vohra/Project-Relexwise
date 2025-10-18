@@ -19,6 +19,7 @@ from app.schemas import (
     ProcessingErrorSchema
 )
 from app.services.cloudinary_service import cloudinary_service
+from app.services.vector_search import get_vector_search_service
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -36,6 +37,8 @@ def set_processing_queue(queue):
 @router.post("/upload", response_model=BulkUploadResponse)
 async def upload_files(
     files: List[UploadFile] = FastAPIFile(...),
+    user_id: str = None,
+    tenant_id: str = None,
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -83,7 +86,7 @@ async def upload_files(
             
             # Add to processing queue
             if processing_queue:
-                await processing_queue.add_file_for_processing(file_id, file_content, file.filename)
+                await processing_queue.add_file_for_processing(file_id, file_content, file.filename, user_id, tenant_id)
             
             uploaded_files.append(FileUploadResponse(
                 file_id=file_id,
@@ -360,6 +363,103 @@ async def get_file_download_url(
     except Exception as e:
         logger.error(f"Error getting download URL for file {file_id}: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/files/by-user/{user_id}", response_model=List[FileWithMetadataSchema])
+async def get_files_by_user(
+    user_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get files belonging to a specific user with full file information and metadata
+    """
+    try:
+        # Get vector search service to find file IDs from ChromaDB
+        vector_service = get_vector_search_service()
+        
+        # Query chunks by user_id to get file IDs
+        result = vector_service.get_files_by_user(user_id)
+        
+        if result["status"] == "not_found":
+            raise HTTPException(
+                status_code=404, 
+                detail=f"No files found for user_id: {user_id}"
+            )
+        elif result["status"] == "error":
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error retrieving files: {result.get('message', 'Unknown error')}"
+            )
+        
+        # Get file IDs from ChromaDB result
+        file_ids = result["file_ids"]
+        
+        if not file_ids:
+            return []
+        
+        # Query database for full file information with metadata
+        stmt = select(File).options(selectinload(File.file_metadata)).where(File.id.in_(file_ids))
+        db_result = await db.execute(stmt)
+        files = db_result.scalars().all()
+        
+        return files
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting files for user_id {user_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.get("/files/by-tenant/{tenant_id}", response_model=List[FileWithMetadataSchema])
+async def get_files_by_tenant(
+    tenant_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get files belonging to a specific tenant with full file information and metadata
+    """
+    try:
+        # Get vector search service to find file IDs from ChromaDB
+        vector_service = get_vector_search_service()
+        
+        # Query chunks by tenant_id to get file IDs
+        result = vector_service.get_files_by_tenant(tenant_id)
+        
+        if result["status"] == "not_found":
+            raise HTTPException(
+                status_code=404, 
+                detail=f"No files found for tenant_id: {tenant_id}"
+            )
+        elif result["status"] == "error":
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error retrieving files: {result.get('message', 'Unknown error')}"
+            )
+        
+        # Get file IDs from ChromaDB result
+        file_ids = result["file_ids"]
+        
+        if not file_ids:
+            return []
+        
+        # Query database for full file information with metadata
+        stmt = select(File).options(selectinload(File.file_metadata)).where(File.id.in_(file_ids))
+        db_result = await db.execute(stmt)
+        files = db_result.scalars().all()
+        
+        return files
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting files for tenant_id {tenant_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+
+
+
+
 
 
 async def _validate_file(file: UploadFile):

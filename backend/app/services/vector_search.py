@@ -51,7 +51,7 @@ class VectorSearchService:
         
         logger.info("Vector search service initialized with friend's implementation")
     
-    def upload_pdfs(self, file_paths: List[str]) -> Dict[str, Any]:
+    def upload_pdfs(self, file_paths: List[str], user_id: str = None, tenant_id: str = None) -> Dict[str, Any]:
         """
         Upload and index a list of PDF files into Chroma.
         """
@@ -65,7 +65,12 @@ class VectorSearchService:
                 documents = self.parser.load_data(file_path)
                 file_id = str(uuid.uuid4().hex[:8])
                 for d in documents:
-                    d.metadata = {"file_id": file_id, "file_name": filename}
+                    d.metadata = {
+                        "file_id": file_id, 
+                        "file_name": filename,
+                        "user_id": user_id,
+                        "tenant_id": tenant_id
+                    }
                 docs.extend(documents)
 
             if docs:
@@ -198,6 +203,108 @@ class VectorSearchService:
 
         except Exception as e:
             return {"status": "error", "message": f"An error occurred during querying: {e}"}
+
+    def get_files_by_user(self, user_id: str) -> Dict[str, Any]:
+        """Get file IDs belonging to a specific user from ChromaDB"""
+        try:
+            # Query ChromaDB for chunks with matching user_id
+            all_docs = self.chroma_collection.get(
+                where={"user_id": {"$eq": user_id}},
+                include=["metadatas"]
+            )
+            
+            if not all_docs or not all_docs.get('metadatas'):
+                return {
+                    "status": "not_found",
+                    "message": f"No files found for user_id: {user_id}",
+                    "file_ids": [],
+                    "total_files": 0,
+                    "total_chunks": 0
+                }
+            
+            # Extract unique file IDs from chunks
+            file_ids = set()
+            total_chunks = len(all_docs['metadatas'])
+            
+            for metadata in all_docs['metadatas']:
+                if metadata:
+                    file_id = metadata.get('file_id')
+                    
+                    if file_id:
+                        file_ids.add(file_id)
+            
+            # Prefer original_file_ids if available (these are the database UUIDs)
+            result_file_ids =  list(file_ids)
+            
+            return {
+                "status": "success",
+                "message": f"Found {len(result_file_ids)} file(s) for user_id: {user_id}",
+                "file_ids": result_file_ids,
+                "total_files": len(result_file_ids),
+                "total_chunks": total_chunks
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting files by user: {str(e)}")
+            return {
+                "status": "error",
+                "message": f"Error retrieving files: {str(e)}",
+                "file_ids": [],
+                "total_files": 0,
+                "total_chunks": 0
+            }
+    
+    def get_files_by_tenant(self, tenant_id: str) -> Dict[str, Any]:
+        """Get file IDs belonging to a specific tenant from ChromaDB"""
+        try:
+            # Query ChromaDB for chunks with matching tenant_id
+            all_docs = self.chroma_collection.get(
+                where={"tenant_id": {"$eq": tenant_id}},
+                include=["metadatas"]
+            )
+            
+            if not all_docs or not all_docs.get('metadatas'):
+                return {
+                    "status": "not_found",
+                    "message": f"No files found for tenant_id: {tenant_id}",
+                    "file_ids": [],
+                    "total_files": 0,
+                    "total_chunks": 0
+                }
+            
+            # Extract unique file IDs from chunks
+            file_ids = set()
+            total_chunks = len(all_docs['metadatas'])
+            
+            for metadata in all_docs['metadatas']:
+                if metadata:
+                    file_id = metadata.get('file_id')
+                    
+                    if file_id:
+                        file_ids.add(file_id)
+            
+            # Prefer original_file_ids if available (these are the database UUIDs)
+            result_file_ids = list(file_ids)
+            
+            return {
+                "status": "success",
+                "message": f"Found {len(result_file_ids)} file(s) for tenant_id: {tenant_id}",
+                "file_ids": result_file_ids,
+                "total_files": len(result_file_ids),
+                "total_chunks": total_chunks
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting files by tenant: {str(e)}")
+            return {
+                "status": "error",
+                "message": f"Error retrieving files: {str(e)}",
+                "file_ids": [],
+                "total_files": 0,
+                "total_chunks": 0
+            }
+
+    
 
     def get_collection_stats(self) -> Dict[str, Any]:
         """Get statistics about the vector collection"""
