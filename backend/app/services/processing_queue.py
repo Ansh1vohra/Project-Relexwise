@@ -188,7 +188,27 @@ class ProcessingQueue:
                 logger.info(f"{worker_name} extracting metadata from {filename}")
                 await self._update_processing_status(db, file_id, "metadata_processing_status", "processing")
                 
-                metadata = await metadata_extraction_service.extract_metadata(extracted_text, file_id)
+                # Create temporary file for metadata classification
+                temp_file_path = None
+                try:
+                    import tempfile
+                    import os
+                    
+                    # Create temporary file with original content
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{filename}") as temp_file:
+                        temp_file.write(file_content)
+                        temp_file_path = temp_file.name
+                    
+                    logger.info(f"{worker_name} created temporary file for classification: {temp_file_path}")
+                    
+                    # Extract metadata with file path for classification
+                    metadata = await metadata_extraction_service.extract_metadata(extracted_text, file_id, temp_file_path)
+                    
+                finally:
+                    # Clean up temporary file
+                    if temp_file_path and os.path.exists(temp_file_path):
+                        os.unlink(temp_file_path)
+                        logger.info(f"{worker_name} cleaned up temporary file: {temp_file_path}")
                 
                 # Store metadata in database
                 await self._store_metadata(db, file_id, metadata, len(extracted_text))
